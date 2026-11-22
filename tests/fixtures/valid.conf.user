@@ -1,0 +1,5 @@
+[General]
+clockFormat=12h
+accentColor="#ffb38a"
+notchStartExpanded=true
+dateFormat="dddd, d MMMM yyyy"

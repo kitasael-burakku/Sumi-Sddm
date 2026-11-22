@@ -1,0 +1,15 @@
+; Valores inválidos a propósito: el tema debe ignorarlos sin errores.
+[General]
+clockFormat=25h
+notchExpandedWidth=banana
+notchRadius=-999
+accentColor=#zz
+blurRadius=1e99
+background=../../../etc/shadow
+uiScale=
+animations=perhaps
+dateFormat=dddd, d MMMM
+multiMonitor=;
+authTimeout=0
+[Other]
+evil=1

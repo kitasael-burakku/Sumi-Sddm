@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""sumi-sddm — herramientas de desarrollo de Sumi SDDM (Fase 2: sin privilegios).
+
+Órdenes:
+  lint             qmllint sobre el tema, el arnés y las pruebas
+  test             qmltestrunner (renderizador software y OpenGL)
+  render           capturas PNG de los escenarios con datos simulados (offscreen)
+  smoke            carga el tema en el greeter REAL (sddm-greeter-qt6 --test-mode, offscreen)
+                   desde una copia en ~/.cache y revisa su registro en el journal
+  check            lint + test + smoke
+
+Nada aquí abre ventanas, usa privilegios, ni toca /etc, /usr o la configuración de SDDM.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+ROOT = Path(__file__).resolve().parent.parent
+THEME = ROOT / "theme" / "sumi"
+QT_BIN = Path("/usr/lib/qt6/bin")
+GREETER = "sddm-greeter-qt6"
+
+SCENARIOS = [
+    "compact", "expanded", "typing", "caps", "authenticating", "failed", "info", "sessions",
+    "confirm", "manual", "other", "nopass", "single", "many", "nosessions", "secondary",
+]
+SIZES = ["1920x1080", "1366x768", "2560x1440", "3840x2160", "1080x1920"]
+
+BACKENDS = {
+    "software": {},
+    "opengl": {"QT_QUICK_BACKEND": "rhi", "QSG_RHI_BACKEND": "opengl"},
+}
+
+
+def qt_tool(name: str) -> str:
+    p = QT_BIN / name
+    if p.exists():
+        return str(p)
+    found = shutil.which(name)
+    if not found:
+        sys.exit(f"sumi-sddm: no encuentro {name}")
+    return found
+
+
+def offscreen_env(backend: str) -> dict:
+    env = dict(os.environ)
+    env.update({"QT_QPA_PLATFORM": "offscreen", "QT_FORCE_STDERR_LOGGING": "1"})
+    env.update(BACKENDS[backend])
+    # Que la prueba no herede escalados de la sesión del usuario.
+    for k in ("QT_SCALE_FACTOR", "QT_SCREEN_SCALE_FACTORS", "QT_AUTO_SCREEN_SCALE_FACTOR", "QT_QUICK_CONTROLS_STYLE"):
+        env.pop(k, None)
+    return env
+
+
+def qml_files(*dirs: Path) -> list[str]:
+    return sorted(str(p) for d in dirs for p in d.rglob("*.qml"))
+
+
+# ── lint ─────────────────────────────────────────────────────────────────────────────────
+def cmd_lint(_args) -> int:
+    qmllint = qt_tool("qmllint")
+    files = [f for f in qml_files(THEME, ROOT / "tests") if not f.endswith("/Main.qml")]
+    rc = subprocess.run([qmllint, "--max-warnings", "0", *files]).returncode
+    # Main.qml usa a propósito las propiedades de contexto de SDDM (no calificadas).
+    rc2 = subprocess.run([qmllint, "--max-warnings", "0", "--unqualified", "disable", str(THEME / "Main.qml")]).returncode
+    ok = rc == 0 and rc2 == 0
+    print(f"lint: {'OK' if ok else 'FALLO'} ({len(files) + 1} archivos)")
+    return 0 if ok else 1
+
+
+# ── test ─────────────────────────────────────────────────────────────────────────────────
+def cmd_test(args) -> int:
+    runner = qt_tool("qmltestrunner")
+    failed = False
+    for backend in args.backend or list(BACKENDS):
+        print(f"── test ({backend})")
+        p = subprocess.run([runner, "-input", str(ROOT / "tests" / "qml")], env=offscreen_env(backend),
+                           capture_output=True, text=True, timeout=600)
+        out = p.stdout + p.stderr
+        for line in out.splitlines():
+            if line.startswith(("FAIL", "Totals", "QWARN", "   Loc", "   Actual", "   Expected")):
+                print("  " + line)
+        failed |= p.returncode != 0
+    print(f"test: {'FALLO' if failed else 'OK'}")
+    return 1 if failed else 0
+
+
+# ── render ───────────────────────────────────────────────────────────────────────────────
+def cmd_render(args) -> int:
+    qml = qt_tool("qml")
+    out_root = Path(args.out).resolve()
+    scenarios = args.scenario or SCENARIOS
+    sizes = args.size or ["1920x1080"]
+    failures = 0
+    for backend in args.backend or ["opengl"]:
+        for size in sizes:
+            d = out_root / backend / size
+            d.mkdir(parents=True, exist_ok=True)
+            for sc in scenarios:
+                png = d / f"{sc}.png"
+                cmd = [qml, str(ROOT / "tests" / "harness" / "Render.qml"), "--",
+                       f"--scenario={sc}", f"--size={size}", f"--out={png}"]
+                if args.config:
+                    cmd.append(f"--config={args.config}")
+                p = subprocess.run(cmd, env=offscreen_env(backend), capture_output=True, text=True, timeout=60)
+                log = (p.stdout + p.stderr).strip().splitlines()
+                noise = [l for l in log if not l.startswith(("qml: sumi-sddm: ready", "qml: render: saved"))]
+                status = "ok" if p.returncode == 0 and png.exists() and not noise else "FALLO"
+                if status != "ok":
+                    failures += 1
+                print(f"  {backend:8} {size:9} {sc:15} {status}")
+                for l in noise:
+                    print("      " + l)
+    print(f"render: {'OK' if failures == 0 else f'{failures} fallos'} → {out_root}")
+    return 0 if failures == 0 else 1
+
+
+# ── smoke (greeter real) ─────────────────────────────────────────────────────────────────
+def cache_dir() -> Path:
+    base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "sumi-sddm"
+
+
+def stage_theme(user_conf: str | None) -> Path:
+    """Copia el tema a ~/.cache/sumi-sddm/smoke/sumi (copia, nunca enlace)."""
+    smoke = cache_dir() / "smoke"
+    target = smoke / "sumi"
+    if target.exists():
+        # Sólo se borra nuestra propia copia, dentro de ~/.cache/sumi-sddm/smoke.
+        assert target.resolve().is_relative_to(cache_dir().resolve()), target
+        shutil.rmtree(target)
+    smoke.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(THEME, target, symlinks=False)
+    if user_conf:
+        shutil.copyfile(user_conf, target / "theme.conf.user")
+    return target
+
+
+def journal_for(pid: int, since: str) -> list[str]:
+    p = subprocess.run(["journalctl", "--no-pager", "-o", "cat", f"_PID={pid}", "--since", since],
+                       capture_output=True, text=True)
+    return p.stdout.splitlines()
+
+
+def cmd_smoke(args) -> int:
+    if not shutil.which(GREETER):
+        print(f"smoke: {GREETER} no está instalado")
+        return 1
+    failed = False
+    for backend in args.backend or list(BACKENDS):
+        target = stage_theme(args.user_conf)
+        since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 1))
+        proc = subprocess.Popen([GREETER, "--test-mode", "--theme", str(target)], env=offscreen_env(backend),
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        time.sleep(args.seconds)
+        proc.terminate()
+        try:
+            out, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, _ = proc.communicate()
+        lines: list[str] = []
+        for _ in range(10):  # el journal puede tardar un poco en escribir
+            lines = journal_for(proc.pid, since)
+            if any("sumi-sddm: ready" in l for l in lines):
+                break
+            time.sleep(0.3)
+        lines += [l for l in (out or "").splitlines() if l.strip()]
+        theme_url = target.as_uri()
+        keywords = ("TypeError", "ReferenceError", "is not defined", "Cannot assign", "failed to load",
+                    "Fallback to embedded theme", "Unable to", "Cannot open")
+        # Cualquier aviso QML del tema cita su URL; las dos líneas informativas de carga no cuentan.
+        problems = [l for l in lines
+                    if (theme_url in l or any(k in l for k in keywords))
+                    and not l.startswith(("Loading file://", "Loading theme configuration"))]
+        ready = [l for l in lines if "sumi-sddm: ready" in l]
+        conf = [l for l in lines if "Loading theme configuration" in l]
+        ok = bool(ready) and not problems
+        failed |= not ok
+        print(f"── smoke ({backend}) pid={proc.pid}: {'OK' if ok else 'FALLO'}")
+        for l in conf + ready:
+            print("  " + l)
+        for l in problems:
+            print("  ! " + l)
+        if args.verbose:
+            for l in lines:
+                print("    | " + l)
+    print(f"smoke: {'FALLO' if failed else 'OK'}")
+    return 1 if failed else 0
+
+
+def cmd_check(args) -> int:
+    rc = cmd_lint(args)
+    args.backend = None
+    rc |= cmd_test(args)
+    args.user_conf, args.seconds, args.verbose = None, 5, False
+    rc |= cmd_smoke(args)
+    print(f"check: {'OK' if rc == 0 else 'FALLO'}")
+    return rc
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="sumi-sddm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("lint").set_defaults(func=cmd_lint)
+    t = sub.add_parser("test")
+    t.add_argument("--backend", action="append", choices=list(BACKENDS))
+    t.set_defaults(func=cmd_test)
+    r = sub.add_parser("render")
+    r.add_argument("--out", default=str(ROOT / "tests" / "out"))
+    r.add_argument("--scenario", action="append", choices=SCENARIOS)
+    r.add_argument("--size", action="append", help="AnchoxAlto (repetible); 'all' = " + ",".join(SIZES))
+    r.add_argument("--backend", action="append", choices=list(BACKENDS))
+    r.add_argument("--config", help="JSON con claves de theme.conf")
+    r.set_defaults(func=cmd_render)
+    s = sub.add_parser("smoke")
+    s.add_argument("--backend", action="append", choices=list(BACKENDS))
+    s.add_argument("--user-conf", help="archivo a copiar como theme.conf.user en la copia de prueba")
+    s.add_argument("--seconds", type=float, default=5)
+    s.add_argument("-v", "--verbose", action="store_true")
+    s.set_defaults(func=cmd_smoke)
+    sub.add_parser("check").set_defaults(func=cmd_check)
+    args = ap.parse_args()
+    if getattr(args, "size", None) == ["all"]:
+        args.size = SIZES
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
