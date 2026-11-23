@@ -228,3 +228,21 @@ Pedida por el autor el 2026-11-22. Fuentes en `integration/sumi-shell/`. Trabajo
   - la vista previa lo enseña recortado en círculo.
 - **Pendiente del autor:** ver la página en la sesión (miniatura del avatar y diálogo de contraseña) y el primer
   inicio de sesión real con Sumi.
+
+### B6: primer inicio de sesión real con Sumi (2026-11-22, autor)
+
+Reinicio a las 21:09. Del journal de este arranque (sólo lectura):
+
+| Hora | Qué |
+|---|---|
+| 21:09:47 | SDDM carga `/usr/share/sddm/themes/sumi/theme.conf` y lanza `sddm-greeter-qt6 --theme /usr/share/sddm/themes/sumi` en X11 (`HDMI-A-0`, 1920×1080) |
+| 21:09:47 | El tema registra `sumi-sddm: ready users=1 sessions=2 primary=true clock=24h custom=7`, lo esperado: las 7 claves reales; `uiScale=1` es el valor por defecto |
+| 21:10:04 | `Login` → sesión `hyprland.desktop` → «Authentication … successful», al primer intento → `LoginSucceeded` → Hyprland arranca |
+
+- **El greeter (PID 884):** **0 avisos QML**, sin «Cannot open» ni errores del tema.
+- **Avisos ajenos al tema.** «Could not setup default cursor» y «gkr-pam: unable to locate daemon control file»
+  también aparecen en el arranque anterior con `orbital`.
+- **Lo que vio el autor:** se veía bien y no había nada raro (avatar, fuente, wallpaper, notch, reloj y teclado).
+
+**Fase 5 completa.** Queda para la Fase 6, en real: contraseña incorrecta y Bloq Mayús, botones de energía,
+cambio de sesión desde la notch, y la página de Settings en la sesión.
