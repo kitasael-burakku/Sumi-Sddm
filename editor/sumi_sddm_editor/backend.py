@@ -59,7 +59,9 @@ def raw_value(entry: dict, value: Any) -> str:
 
 
 def local_path(path: Any) -> str:
-    """Ruta de un FileDialog (`file:///…`) o escrita a mano (`~/…`) → ruta local."""
+    """Ruta de un FileDialog (QUrl o `file:///…`) o escrita a mano (`~/…`) → ruta local."""
+    if isinstance(path, QUrl):
+        path = path.toLocalFile() if path.isLocalFile() else path.toString()
     p = str(path or "").strip()
     if p.startswith("file:"):
         p = QUrl(p).toLocalFile()
@@ -496,6 +498,18 @@ class Backend(QObject):
             self.clearAvatar()
         else:
             self.set(key, None)
+
+    @Slot()
+    def flushNow(self) -> None:
+        """Escribe ya lo pendiente (al cerrar la ventana: no se pierde lo de los últimos 300 ms)."""
+        if self._pending:
+            self._write_timer.stop()
+            self._flush()
+
+    @Slot()
+    def dismiss(self) -> None:
+        """Cierra el aviso o el error que se está enseñando."""
+        self._clear_messages()
 
     def _flush(self) -> None:
         if not self._pending:

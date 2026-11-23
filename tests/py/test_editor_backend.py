@@ -17,20 +17,15 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "editor"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-try:
-    from PySide6.QtCore import QCoreApplication, QEventLoop, QProcess
-except ImportError:          # pragma: no cover - depende del sistema
-    QCoreApplication = None
+from qt_support import QGuiApplication as QCoreApplication, app  # noqa: E402  (None sin PySide6)
 
 if QCoreApplication is not None:
+    from PySide6.QtCore import QEventLoop, QProcess, QUrl
     from sumi_sddm_editor.backend import Backend, enum_label, local_path, raw_value
 
 FAKE = Path(__file__).resolve().parent / "fake_sumi_sddm.py"
-
-
-def app():
-    return QCoreApplication.instance() or QCoreApplication([])
 
 
 @unittest.skipIf(QCoreApplication is None, "PySide6 no está instalado")
@@ -487,6 +482,7 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(local_path("file:///a/b%20c.png"), "/a/b c.png")
         self.assertEqual(local_path(" ~/x "), os.path.expanduser("~/x"))
         self.assertEqual(local_path("rel/x"), "rel/x")
+        self.assertEqual(local_path(QUrl.fromLocalFile("/a b/c#d.png")), "/a b/c#d.png")
         self.assertEqual(enum_label("top-left"), "Top left")
         self.assertEqual(enum_label("24h"), "24 h")
 

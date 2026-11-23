@@ -2,7 +2,8 @@
 
 > Estado: **decisiones tomadas; fase 0 cerrada** (paquete 0.5.0-1 instalado y probado por el autor el 2026-11-23:
 > `/usr/bin/sumi-sddm` responde `kind: "system"`, el tema sigue activo y en sincronía; la copia de usuario se
-> quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). Fases 2–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). **Fase 2 hecha** (formulario; 18 pruebas de ventana),
+> pendiente de que el autor la pruebe en su escritorio. Fases 3–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
 > sugerencias de clave.
 
 ## Por qué
@@ -132,6 +133,21 @@ de guardar, recarga que pisa lo pendiente, apply sin esperar, Try sin dos pulsac
 - `warnings` de `config show` aparecen junto a su clave (p. ej. la fuente).
 - Barra lateral con los grupos del esquema y búsqueda por nombre o etiqueta.
 - Pie: «Reset all» (copia `.prev`) / «Restore previous», con dos pulsaciones.
+
+**Cómo quedó (fase 2).** `Main.qml` + `Field.qml` (Qt Quick Controls, estilo Fusion salvo que
+`QT_QUICK_CONTROLS_STYLE` diga otro), `__main__.py` y el lanzador de desarrollo `editor/sumi-sddm-editor`.
+
+- Adelantado de la fase 3: el fondo ya se elige con `FileDialog` → `wallpaper set` y se quita con «Remove».
+  Sigue para la fase 3: el selector de fuentes (hoy `fontFamily` es un campo de texto), el avatar y la vista previa.
+- Antes de enviar se comprueba lo evidente (rango, hex, `pattern` del esquema) para dar el aviso en inglés junto
+  al campo. Si aun así la CLI rechaza algo, su mensaje (en español) se enseña en el pie, como en Settings.
+  Pendiente: que la CLI dé esos errores también en inglés, como ya hace con `warnings`.
+- Al cerrar con una escritura pendiente (los 300 ms de agrupado), se escribe antes de salir (`flushNow`).
+- Pruebas: `tests/py/test_editor_ui.py`, offscreen y con eventos reales (clic, teclas, Enter con el foco). Cada
+  prueba exige cero avisos de QML. El criterio de salida se prueba con la CLI del repositorio y un
+  `XDG_CONFIG_HOME` temporal: lo editado llega a `theme.conf.user`; un `config set` desde la terminal produce el
+  aviso (al recuperar el foco o por `--expect`) y no se pierde. Comprobadas con roturas a propósito; dos de ellas
+  (re-enlazar Switch y ComboBox tras editar) mostraron que ese código sobraba en Qt 6 y se quitó.
 
 ### Vista previa
 
