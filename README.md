@@ -21,7 +21,7 @@ borde superior de la pantalla: está recogida mientras no la usas y se despliega
 - **Una configuración rota nunca te deja fuera.** Al configurar se valida todo de forma estricta. En la pantalla
   de inicio, un valor que no se entiende vuelve a su valor por defecto.
 - **Se usa entera con el teclado** y es accesible: cada control tiene rol y nombre para lectores de pantalla.
-- **Una ventana para configurarlo** (opcional): «Login Screen (Sumi)», con vista previa y botón para aplicar,
+- **Una ventana para configurarlo** (opcional): «Sumi Settings», con vista previa y botón para aplicar,
   en cualquier escritorio (ver [La ventana de ajustes](#la-ventana-de-ajustes)).
 - **Independiente.** No necesita Quickshell, Hyprland ni nada más. Si usas Sumi Shell, sus ajustes incluyen
   una página para configurarlo (ver [Integración](#integración-con-sumi-shell)).
@@ -46,7 +46,7 @@ cd Sumi-Sddm
 cd packaging/arch && makepkg
 # El tema, el helper y el comando `sumi-sddm`. NO activa el tema.
 sudo pacman -U sumi-sddm-0*.pkg.tar.zst
-# Opcional: la ventana de ajustes «Login Screen (Sumi)».
+# Opcional: la ventana de ajustes «Sumi Settings».
 sudo pacman -U sumi-sddm-editor-*.pkg.tar.zst
 ```
 
@@ -109,12 +109,18 @@ movimiento y comportamiento**. Cada una, con su rango y su valor por defecto, es
 
 ## La ventana de ajustes
 
-El paquete opcional `sumi-sddm-editor` añade **Login Screen (Sumi)** al menú de aplicaciones (o
+El paquete opcional `sumi-sddm-editor` añade **Sumi Settings** al menú de aplicaciones (o
 `sumi-sddm-editor` desde una terminal). Es lo mismo que `sumi-sddm config`, pero con un formulario por grupos,
 búsqueda, vista previa al momento, selector de tipografías (marca las que el greeter no puede ver), tu avatar y
 una página **Login screen** para aplicar, activar o volver al tema anterior; cada una de esas tres pide la
 contraseña de un administrador. Sigue el tema claro u oscuro del sistema, se usa entera con el teclado y no
 corre nunca como root: todo lo hace la orden `sumi-sddm`.
+
+La barra lateral aparece desde 780 px lógicos. En ventanas más estrechas puedes cambiar de sección con el
+selector junto a la búsqueda. Desde 1180 px lógicos, la vista previa se acopla a la derecha y se puede
+expandir. En una ventana más estrecha, **Preview** la abre en el área central. Usa Ctrl+F para buscar por
+nombre o clave y Tab para recorrer los controles. Si el entorno no le comunica a Qt la preferencia de
+movimiento reducido, puedes iniciar el editor con `SUMI_SETTINGS_REDUCE_MOTION=1`.
 
 Puede estar abierta a la vez que la terminal o que los ajustes de Sumi Shell: si algo cambia por otro lado, lo
 avisa y recarga en vez de pisarlo.
@@ -184,7 +190,7 @@ tools/sumi-sddm            CLI sin privilegios: config, wallpaper, avatar, previ
 tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas, bloqueo
 tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
 system/                    helper privilegiado (pkexec) y su acción de polkit
-editor/                    ventana de ajustes (PySide6 + QML): backend.py y Main/Field/Preview/SystemPanel.qml
+editor/                    Sumi Settings (PySide6 + Qt Quick Controls): componentes QML y backend de la CLI
 packaging/arch/            PKGBUILD dividido: sumi-sddm (tema, helper, CLI) y sumi-sddm-editor; no activa nada
 integration/sumi-shell/    página Login screen para los ajustes de Sumi Shell
 tests/                     pruebas Python y QML, y casos compartidos entre ambos

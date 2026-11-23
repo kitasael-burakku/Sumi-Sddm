@@ -175,7 +175,7 @@ class Backend(QObject):
         self._previewUrl = self._previewStamp = ""
         self._previewFailed = False
         self._previewStale = True
-        self._previewScenario = ""
+        self._previewScenario = self._renderedSize = ""
         self._previewSerial = 0
         self._scenario = "expanded"
         self._previewSize = "1280x720"
@@ -244,6 +244,7 @@ class Backend(QObject):
     def _set_preview_size(self, v: str) -> None:
         if v != self._previewSize:
             self._put("previewSize", str(v))
+            self._refresh_stale()
             self.schedulePreview()
 
     previewSize = Property(str, _get_preview_size, _set_preview_size, notify=previewSizeChanged)
@@ -264,7 +265,8 @@ class Backend(QObject):
         self._put("busy", self._running is not None or bool(self._queue) or self._write_timer.isActive())
 
     def _refresh_stale(self) -> None:
-        self._put("previewStale", self._previewStamp != self._stamp or self._previewScenario != self._scenario)
+        self._put("previewStale", self._previewStamp != self._stamp or self._previewScenario != self._scenario
+                  or self._renderedSize != self._previewSize)
 
     def _set_stamp(self, s: str) -> None:
         self._put("stamp", s)
@@ -751,6 +753,7 @@ class Backend(QObject):
                 self._put("previewUrl", QUrl.fromLocalFile(str(doc["png"])).toString() + f"?v={self._previewSerial}")
                 self._put("previewStamp", str(doc.get("stamp") or ""))
                 self._previewScenario = sc
+                self._renderedSize = size
                 self._put("previewFailed", False)
             else:
                 self._put("previewFailed", True)

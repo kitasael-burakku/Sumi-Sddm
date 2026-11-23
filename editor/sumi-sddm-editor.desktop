@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Login Screen (Sumi)
+Name=Sumi Settings
 GenericName=Login Screen Settings
 Comment=Customise the Sumi SDDM login screen and apply it
 Exec=sumi-sddm-editor

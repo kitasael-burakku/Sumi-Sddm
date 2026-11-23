@@ -25,6 +25,10 @@ Item {
     id: root
 
     required property var backend
+    property bool divider: false
+
+    implicitHeight: row.implicitHeight
+    implicitWidth: row.implicitWidth
     required property string key
 
     objectName: "field-" + root.key
@@ -35,84 +39,38 @@ Item {
     readonly property var current: root.backend.values[root.key] || ({})
     readonly property var value: root.current.value
     readonly property bool isSet: root.current.set === true
-    readonly property string caption: { root.backend.warnings; root.backend.keys; return root.backend.captionFor(root.key); }
-    readonly property bool warned: root.backend.warnings.some(w => w.key === root.key)
+    readonly property var warning: root.backend.warnings.find(w => w.key === root.key)
+    readonly property bool warned: !!root.warning
+    readonly property string caption: root.warning || root.entry.help ? root.backend.captionFor(root.key) : ""
     /** Lo que no se envió por no valer (en inglés, junto al campo). Se borra al siguiente cambio válido. */
     property string problem: ""
     /** Lo que la CLI rechazó de esta clave en la última escritura (`fields` de su respuesta). */
     readonly property string rejected: String(root.backend.fieldErrors[root.key] || "")
+    readonly property size windowSize: Qt.size(Window.width, Window.height)
 
     function send(v) { root.problem = ""; root.backend.set(root.key, v); }
 
-    implicitHeight: Math.max(row.implicitHeight, 40) + 12
-    implicitWidth: row.implicitWidth
-
-    RowLayout {
+    SettingsRow {
         id: row
         anchors.fill: parent
-        anchors.topMargin: 6
-        anchors.bottomMargin: 6
-        spacing: 12
+        divider: root.divider
 
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.preferredWidth: 1
-            Layout.minimumWidth: 160
-            spacing: 2
-            RowLayout {
-                spacing: 6
-                Label {
-                    objectName: "label"
-                    text: root.label
-                    font.weight: Font.DemiBold
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
-                }
-                Rectangle {
-                    objectName: "customDot"
-                    visible: root.isSet
-                    implicitWidth: 7
-                    implicitHeight: 7
-                    radius: 3.5
-                    color: palette.highlight
-                    Accessible.role: Accessible.Indicator
-                    Accessible.name: "Customised"
-                }
-            }
-            Label {
-                objectName: "caption"
-                visible: text.length > 0
-                text: root.problem.length > 0 ? root.problem : root.rejected.length > 0 ? root.rejected : root.caption
-                color: root.problem.length > 0 || root.rejected.length > 0 || root.warned ? Tones.error
-                                                                                        : palette.placeholderText
-                wrapMode: Text.Wrap
-                font.pointSize: Qt.application.font.pointSize * 0.9
-                Layout.fillWidth: true
-            }
-        }
+        title: root.label
+        description: root.problem || root.rejected || (root.type === "path" && !root.warned ? "" : root.caption)
+        descriptionColor: root.problem || root.rejected || root.warned ? Tones.error : Tones.muted
+        modified: root.isSet
+        resettable: root.type !== "path"
+        defaultHint: "Default: " + (String(root.entry["default"]) || "empty")
+        wideControl: root.type === "path"
+        onReset: { root.problem = ""; root.backend.unset(root.key); }
 
-        Loader {
-            id: loader
-            Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-            sourceComponent: root.type === "bool" ? boolC
-                : root.type === "enum" ? ((root.entry.values || []).length <= 4 ? segmentsC : comboC)
-                : root.type === "integer" || root.type === "number" ? numberC
-                : root.type === "color" ? colorC
-                : root.type === "path" ? pathC
-                : root.type === "string" && root.key === "fontFamily" && root.backend.fonts.length > 0 ? fontC
-                : root.type === "string" ? textC : null
-        }
-
-        ToolButton {
-            objectName: "reset"
-            text: "Reset"
-            opacity: root.isSet ? 1 : 0
-            enabled: root.isSet
-            Accessible.name: "Reset " + root.label + " to its default"
-            ToolTip.visible: hovered
-            ToolTip.text: "Default: " + (String(root.entry["default"]) || "empty")
-            onClicked: { root.problem = ""; root.backend.unset(root.key); }
-        }
+        control: root.type === "bool" ? boolC
+            : root.type === "enum" ? ((root.entry.values || []).length <= 4 ? segmentsC : comboC)
+            : root.type === "integer" || root.type === "number" ? numberC
+            : root.type === "color" ? colorC
+            : root.type === "path" ? pathC
+            : root.type === "string" && root.key === "fontFamily" && root.backend.fonts.length > 0 ? fontC
+            : root.type === "string" ? textC : null
     }
 
     DropArea {
@@ -125,16 +83,16 @@ Item {
     Rectangle {
         anchors.fill: parent
         visible: drop.containsDrag
-        color: "transparent"
-        border.width: 2
+        color: Tones.unfilled
+        border.width: Tones.focusStroke
         border.color: palette.highlight
-        radius: 4
+        radius: Tones.controlRadius
     }
 
     // ---- controles -------------------------------------------------------------------------------------------------
     Component {
         id: boolC
-        Switch {
+        ToggleSwitch {
             objectName: "switch"
             checked: root.value === true
             Accessible.name: root.label
@@ -144,21 +102,29 @@ Item {
 
     Component {
         id: segmentsC
-        Row {
+        Pane {
             objectName: "segments"
-            spacing: 0
-            Repeater {
-                model: root.entry.values || []
-                delegate: Button {
-                    required property var modelData
-                    objectName: "segment-" + modelData
-                    text: root.backend.enumLabel(modelData)
-                    checkable: false
-                    checked: root.value === modelData
-                    Accessible.name: root.label + ": " + text
-                    Accessible.checkable: true
-                    Accessible.checked: checked
-                    onClicked: if (root.value !== modelData) root.send(modelData)
+            padding: Tones.small
+            background: Rectangle {
+                radius: Tones.controlRadius
+                color: Tones.control
+            }
+            contentItem: RowLayout {
+                spacing: Tones.small
+                Repeater {
+                    model: root.entry.values || []
+                    delegate: ActionButton {
+                        required property var modelData
+                        objectName: "segment-" + modelData
+                        text: root.backend.enumLabel(modelData)
+                        flat: true
+                        checkable: false
+                        checked: root.value === modelData
+                        Accessible.name: root.label + ": " + text
+                        Accessible.checkable: true
+                        Accessible.checked: checked
+                        onClicked: if (root.value !== modelData) root.send(modelData)
+                    }
                 }
             }
         }
@@ -166,7 +132,7 @@ Item {
 
     Component {
         id: comboC
-        ComboBox {
+        ChoiceBox {
             readonly property var vals: root.entry.values || []
             objectName: "combo"
             implicitWidth: 180
@@ -194,7 +160,7 @@ Item {
                 n = Math.max(num.lo, Math.min(num.hi, Math.round(n * 1000) / 1000));
                 return num.integer ? Math.round(n) : n;
             }
-            spacing: 8
+            spacing: Tones.gap
 
             CheckBox {
                 objectName: "off"
@@ -207,7 +173,7 @@ Item {
                     root.send(checked ? 0 : (d > 0 ? d : num.lo));
                 }
             }
-            Slider {
+            NumericSlider {
                 objectName: "slider"
                 enabled: !num.off
                 from: num.lo
@@ -215,20 +181,22 @@ Item {
                 stepSize: num.stepv
                 snapMode: Slider.SnapAlways
                 value: num.off ? num.lo : Number(root.value)
-                implicitWidth: 200
+                implicitWidth: 116
+                Layout.fillWidth: true
+                Layout.minimumWidth: 64
                 Accessible.name: root.label
                 onMoved: {
                     const n = num.snap(value);
                     if (n !== Number(root.value)) root.send(n);
                 }
             }
-            TextField {
+            InputField {
                 objectName: "number"
                 enabled: !num.off
                 text: num.off ? "" : num.fmt(Number(root.value))
                 placeholderText: num.off ? "Off" : ""
                 horizontalAlignment: Text.AlignRight
-                implicitWidth: 72
+                implicitWidth: 76
                 rightPadding: unitLabel.visible ? unitLabel.implicitWidth + 10 : leftPadding
                 inputMethodHints: num.integer ? Qt.ImhFormattedNumbersOnly : Qt.ImhPreferNumbers
                 Accessible.name: root.label + " value" + num.unit
@@ -238,7 +206,7 @@ Item {
                     text: num.unit.trim()
                     color: palette.placeholderText
                     anchors.right: parent.right
-                    anchors.rightMargin: 6
+                    anchors.rightMargin: Tones.gap
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 onEditingFinished: {
@@ -260,30 +228,31 @@ Item {
         id: colorC
         RowLayout {
             id: col
-            spacing: 8
+            spacing: Tones.gap
             function hexOf(c) {
                 const h = (n) => ("0" + Math.round(n * 255).toString(16)).slice(-2);
                 return "#" + (c.a < 1 ? h(c.a) : "") + h(c.r) + h(c.g) + h(c.b);
             }
-            Button {
+            ActionButton {
                 objectName: "swatch"
                 implicitWidth: 36
-                implicitHeight: 28
+                implicitHeight: Tones.controlHeight
                 Accessible.name: "Choose " + root.label + " colour"
+                padding: Tones.small
                 contentItem: Rectangle {
-                    radius: 3
+                    radius: Tones.small
                     color: String(root.value || "#000000")
                     border.width: 1
-                    border.color: Qt.rgba(0.5, 0.5, 0.5, 0.6)
+                    border.color: Tones.muted
                 }
                 onClicked: { dialog.selectedColor = String(root.value || "#000000"); dialog.open(); }
             }
-            TextField {
+            InputField {
                 objectName: "hex"
                 text: String(root.value || "")
                 placeholderText: String(root.entry["default"] || "#000000")
                 implicitWidth: 110
-                font.family: "monospace"
+                font.family: Tones.mono
                 Accessible.name: root.label + " colour"
                 onEditingFinished: {
                     const raw = text.trim();
@@ -306,7 +275,7 @@ Item {
 
     Component {
         id: textC
-        TextField {
+        InputField {
             objectName: "text"
             text: String(root.value || "")
             placeholderText: root.key === "fontFamily" ? "Bundled Inter" : String(root.entry["default"] || "Default")
@@ -328,31 +297,37 @@ Item {
 
     Component {
         id: fontC
-        Button {
+        ActionButton {
             id: fontButton
             readonly property string family: String(root.value || "")
-            readonly property var found: root.backend.fonts.find(f => f.family === fontButton.family)
             objectName: "fontButton"
             implicitWidth: 220
             text: fontButton.family.length > 0 ? fontButton.family : "Bundled Inter"
-            font.family: fontButton.family.length > 0 ? fontButton.family : Qt.application.font.family
+            font.family: fontButton.family.length > 0 ? fontButton.family : Tones.uiFont.family
+            contentItem: Label {
+                text: fontButton.text
+                font: fontButton.font
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+            }
             Accessible.name: root.label + ": " + text
             onClicked: { fontSearch.text = ""; fontPopup.open(); fontSearch.forceActiveFocus(); }
 
             Popup {
                 id: fontPopup
                 objectName: "fontPopup"
-                y: fontButton.height + 4
+                y: fontButton.height + Tones.small
                 x: fontButton.width - width
-                width: 320
-                height: 380
-                padding: 8
+                width: Math.min(320, Math.max(1, root.windowSize.width - Tones.gutter))
+                height: Math.min(380, Math.max(1, root.windowSize.height - Tones.gutter))
+                margins: Tones.gap
+                padding: Tones.gap
                 focus: true
 
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 6
-                    TextField {
+                    InputField {
                         id: fontSearch
                         objectName: "fontSearch"
                         placeholderText: "Search " + root.backend.fonts.length + " fonts"
@@ -361,7 +336,7 @@ Item {
                         Keys.onDownPressed: { fontList.forceActiveFocus(); fontList.currentIndex = 0; }
                         Keys.onReturnPressed: if (fontList.count > 0) fontList.pick(fontList.model[0])
                     }
-                    FontMetrics { id: uiMetrics; font: Qt.application.font }
+                    FontMetrics { id: uiMetrics; font: Tones.uiFont }
                     ListView {
                         id: fontList
                         objectName: "fontList"
@@ -397,8 +372,8 @@ Item {
                                     // cada familia en su letra, pero en la altura de una fila de la interfaz:
                                     // las de métricas enormes se encogen hasta caber
                                     text: fd.modelData.family || "Bundled Inter (default)"
-                                    font.family: fd.modelData.family || Qt.application.font.family
-                                    font.pointSize: Qt.application.font.pointSize
+                                    font.family: fd.modelData.family || Tones.uiFont.family
+                                    font.pointSize: Tones.uiFont.pointSize
                                     fontSizeMode: Text.Fit
                                     minimumPointSize: 6
                                     verticalAlignment: Text.AlignVCenter
@@ -411,7 +386,7 @@ Item {
                                     visible: !fd.modelData.system
                                     text: "Only in your home folder · the login screen can't use it"
                                     color: Tones.error
-                                    font.pointSize: Qt.application.font.pointSize * 0.8
+                                    font.pointSize: Tones.uiFont.pointSize * 0.8
                                 }
                             }
                             onClicked: fontList.pick(fd.modelData)
@@ -425,32 +400,44 @@ Item {
 
     Component {
         id: pathC
-        RowLayout {
+        GridLayout {
             id: pathRow
-            /** Lo que pasa al elegir (diálogo) o soltar (arrastrar) una imagen. */
-            function choose(url) { root.backend.setWallpaper(url); }
+
             objectName: "wallpaperRow"
-            spacing: 8
+            columns: width >= 390 ? 2 : 1
+            rowSpacing: Tones.gap
+            columnSpacing: Tones.inset
+            function choose(url) { root.backend.setWallpaper(url); }
+
             Label {
                 objectName: "pathValue"
-                text: String(root.value || "").length > 0 ? String(root.value).replace(/^backgrounds\//, "")
-                                                          : "Built-in background"
-                color: String(root.value || "").length > 0 ? palette.text : palette.placeholderText
+                text: root.value ? String(root.value).replace(/^backgrounds\//, "") : "Built-in background"
+                color: root.value ? Tones.ink : Tones.muted
                 elide: Text.ElideMiddle
-                Layout.maximumWidth: 180
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                ToolTip.visible: pathHover.hovered && truncated
+                ToolTip.text: text
+                HoverHandler { id: pathHover }
             }
-            Button {
-                objectName: "choose"
-                text: "Choose image…"
-                Accessible.name: "Choose a wallpaper image"
-                onClicked: files.open()
-            }
-            Button {
-                objectName: "remove"
-                visible: String(root.value || "").length > 0
-                text: "Remove"
-                Accessible.name: "Remove the wallpaper"
-                onClicked: root.backend.clearWallpaper()
+            RowLayout {
+                spacing: Tones.gap
+                ActionButton {
+                    objectName: "choose"
+                    text: "Choose image…"
+                    glyph: "background"
+                    Accessible.name: "Choose a wallpaper image"
+                    onClicked: files.open()
+                }
+                ActionButton {
+                    objectName: "remove"
+                    visible: !!root.value
+                    flat: true
+                    tone: Tones.error
+                    text: "Remove"
+                    Accessible.name: "Remove the wallpaper"
+                    onClicked: root.backend.clearWallpaper()
+                }
             }
             FileDialog {
                 id: files

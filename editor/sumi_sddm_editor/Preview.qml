@@ -4,136 +4,170 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-/**
- * Vista previa: el PNG de `sumi-sddm preview` con lo GUARDADO (lo que verá el greeter), 600 ms después del último
- * cambio y una a la vez (lo decide el backend). Mientras se genera otra, la anterior se queda atenuada.
- *
- * Escena (las de Settings) y tamaño (por defecto, el de la pantalla en píxeles reales). «Try in a window» abre el
- * greeter real con `try --yes`: toma el teclado hasta cerrar esa ventana, así que pide dos pulsaciones.
- */
-Pane {
+// One panel and one Image for the saved-config render, even when the window changes layout.
+SettingsScroll {
     id: root
 
     required property var backend
-    /** Tamaños ofrecidos además del de la pantalla («AnchoxAlto»). */
-    property var sizes: ["1920x1080", "2560x1440", "1366x768", "1280x800", "3840x2160"]
     property string screenSize: ""
+    property bool canExpand: false
+    property bool expanded: false
+    signal toggleExpanded()
 
     readonly property var sizeList: {
-        const l = root.screenSize.length > 0 ? [root.screenSize] : [];
-        for (const s of root.sizes) if (l.indexOf(s) < 0) l.push(s);
-        if (l.indexOf(root.backend.previewSize) < 0) l.push(root.backend.previewSize);
-        return l;
+        const sizes = ["1920x1080", "2560x1440", "1366x768", "1280x800", "3840x2160"];
+        return [...new Set([root.screenSize, ...sizes, root.backend.previewSize].filter(Boolean))];
     }
     readonly property real aspect: {
-        const m = /^(\d+)x(\d+)$/.exec(root.backend.previewSize);
-        return m ? Number(m[2]) / Number(m[1]) : 9 / 16;
+        const size = /^(\d+)x(\d+)$/.exec(root.backend.previewSize);
+        return size ? Number(size[2]) / Number(size[1]) : 9 / 16;
     }
     readonly property bool working: root.backend.previewStale && !root.backend.previewFailed
 
-    padding: 16
+    function focusPanel() { scene.forceActiveFocus(Qt.TabFocusReason); }
 
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 10
+    background: Rectangle {
+        color: Tones.chrome
+        Rectangle { width: Tones.stroke; height: parent.height; color: Tones.border }
+    }
 
-        RowLayout {
-            Layout.fillWidth: true
+    Item {
+        width: root.availableWidth
+        implicitHeight: content.implicitHeight + Tones.gutter * 2
+
+        ColumnLayout {
+            id: content
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: Tones.gutter
+            width: Math.min(1056, parent.width - Tones.gutter * 2)
+            spacing: Tones.padding
+
+            RowLayout {
+                Layout.fillWidth: true
+                SectionHeader {
+                    title: "Preview"
+                    description: "Rendered from your saved settings"
+                    Layout.fillWidth: true
+                }
+                ActionButton {
+                    objectName: "expandPreview"
+                    visible: root.canExpand
+                    glyph: root.expanded ? "collapse" : "expand"
+                    flat: true
+                    Accessible.name: root.expanded ? "Dock preview" : "Expand preview"
+                    ToolTip.visible: hovered || visualFocus
+                    ToolTip.text: Accessible.name
+                    onClicked: root.toggleExpanded()
+                }
+            }
+
+            Rectangle {
+                objectName: "frame"
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.max(144, Math.min(width * root.aspect, root.height - 225))
+                color: Tones.frame
+                border.width: Tones.stroke
+                border.color: Tones.border
+                radius: Tones.cardRadius
+
+                Item {
+                    anchors.fill: parent
+                    anchors.margins: Tones.gap
+                    Image {
+                        id: shot
+                        objectName: "previewImage"
+                        anchors.fill: parent
+                        source: root.backend.previewUrl
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        cache: false
+                        smooth: true
+                        mipmap: true
+                        opacity: root.working ? 0.45 : 1
+                        Behavior on opacity { NumberAnimation { duration: Tones.duration; easing.type: Tones.easing } }
+                        Accessible.role: Accessible.Graphic
+                        Accessible.name: "Login screen preview"
+                    }
+                    BusyIndicator {
+                        anchors.centerIn: parent
+                        running: root.working && root.visible
+                        visible: running
+                    }
+                    Label {
+                        objectName: "previewPlaceholder"
+                        anchors.centerIn: parent
+                        width: parent.width - Tones.padding
+                        visible: (shot.status !== Image.Ready || root.backend.previewFailed) && !root.working
+                        text: root.backend.previewFailed ? "The preview could not be made" : "No preview yet"
+                        color: Tones.frameText
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.Wrap
+                    }
+                }
+            }
             Label {
-                text: "Preview"
-                font.weight: Font.DemiBold
-                font.pointSize: Qt.application.font.pointSize * 1.2
+                objectName: "stale"
+                visible: root.working
+                text: "Updating…"
+                color: Tones.muted
+                Accessible.role: Accessible.StaticText
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Tones.inset
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: Tones.small
+                    Label { text: "Scene"; color: Tones.muted }
+                    ChoiceBox {
+                        id: scene
+                        objectName: "scenario"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        model: root.backend.scenarios
+                        textRole: "label"
+                        valueRole: "value"
+                        currentIndex: root.backend.scenarios.findIndex(entry => entry.value === root.backend.scenario)
+                        Accessible.name: "Preview scene"
+                        onActivated: root.backend.scenario = currentValue
+                    }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: Tones.small
+                    Label { text: "Resolution"; color: Tones.muted }
+                    ChoiceBox {
+                        objectName: "size"
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        model: root.sizeList
+                        currentIndex: root.sizeList.indexOf(root.backend.previewSize)
+                        displayText: currentText + (currentText === root.screenSize ? "  (this screen)" : "")
+                        Accessible.name: "Preview size"
+                        onActivated: root.backend.previewSize = currentText
+                    }
+                }
+            }
+
+            ActionButton {
+                objectName: "tryWindow"
+                text: root.backend.tryArmed ? "Press again to open" : "Try in a window"
+                glyph: "system"
+                highlighted: root.backend.tryArmed
+                Accessible.name: root.backend.tryArmed ? "Press again to open the test login window"
+                    : "Try the login screen in a window"
+                onClicked: root.backend.openTestWindow()
+            }
+            Label {
+                text: "The test window takes keyboard input until you close it."
+                color: Tones.muted
+                font.pointSize: Tones.uiFont.pointSize * Tones.captionScale
+                wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
-            ComboBox {
-                objectName: "scenario"
-                model: root.backend.scenarios
-                textRole: "label"
-                valueRole: "value"
-                currentIndex: root.backend.scenarios.findIndex(s => s.value === root.backend.scenario)
-                Accessible.name: "Preview scene"
-                onActivated: root.backend.scenario = currentValue
-            }
         }
-
-        Rectangle {
-            objectName: "frame"
-            Layout.fillWidth: true
-            Layout.preferredHeight: width * root.aspect
-            color: "#101114"
-            radius: 4
-            clip: true
-
-            Image {
-                id: shot
-                objectName: "previewImage"
-                anchors.fill: parent
-                source: root.backend.previewUrl
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                cache: false
-                smooth: true
-                mipmap: true
-                opacity: root.working ? 0.45 : 1
-                Behavior on opacity { NumberAnimation { duration: 150 } }
-                Accessible.role: Accessible.Graphic
-                Accessible.name: "Login screen preview"
-            }
-            BusyIndicator {
-                anchors.centerIn: parent
-                running: root.working
-                visible: running
-            }
-            Label {
-                objectName: "previewPlaceholder"
-                anchors.centerIn: parent
-                visible: shot.status !== Image.Ready && !root.working
-                text: root.backend.previewFailed ? "The preview could not be made" : "No preview yet"
-                color: "#c8c8cc"
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
-            Label { text: "Size" }
-            ComboBox {
-                objectName: "size"
-                model: root.sizeList
-                currentIndex: root.sizeList.indexOf(root.backend.previewSize)
-                displayText: currentText + (currentText === root.screenSize ? "  (this screen)" : "")
-                Accessible.name: "Preview size"
-                Layout.fillWidth: true
-                onActivated: root.backend.previewSize = currentText
-            }
-        }
-
-        Label {
-            objectName: "stale"
-            visible: root.working
-            text: "Updating…"
-            color: palette.placeholderText
-        }
-
-        Item { Layout.preferredHeight: 4 }
-
-        Button {
-            objectName: "tryWindow"
-            text: root.backend.tryArmed ? "Press again to open" : "Try in a window"
-            highlighted: root.backend.tryArmed
-            Accessible.name: root.backend.tryArmed ? "Press again to open the test window" : "Try the login screen in a window"
-            onClicked: root.backend.openTestWindow()
-        }
-        Label {
-            objectName: "tryHelp"
-            text: "Opens the real login screen in a window with your saved settings. It takes the keyboard until you "
-                + "close that window; logging in and power buttons do nothing there."
-            wrapMode: Text.Wrap
-            color: root.backend.tryArmed ? palette.windowText : palette.placeholderText
-            font.pointSize: Qt.application.font.pointSize * 0.9
-            Layout.fillWidth: true
-        }
-
-        Item { Layout.fillHeight: true }
     }
 }

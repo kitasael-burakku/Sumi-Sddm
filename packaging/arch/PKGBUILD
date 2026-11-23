@@ -1,7 +1,7 @@
 # Sumi SDDM — paquetes locales, construidos desde este repositorio (sin descargas).
 #   cd packaging/arch && makepkg              # construir los dos (sin root)
 #   sudo pacman -U sumi-sddm-0*.pkg.tar.zst   # el tema, la CLI y el helper: NO activa el tema
-#   sudo pacman -U sumi-sddm-editor-*.pkg.tar.zst   # opcional: la ventana «Login Screen (Sumi)» (PySide6)
+#   sudo pacman -U sumi-sddm-editor-*.pkg.tar.zst   # opcional: la ventana «Sumi Settings» (PySide6)
 #   El paquete trae la CLI en /usr/bin/sumi-sddm; `install --user` sólo hace falta sin el paquete.
 # Dividido para que el tema nunca dependa de PySide6 (docs/EDITOR-PLAN.md, D2).
 pkgbase=sumi-sddm

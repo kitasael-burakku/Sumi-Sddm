@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from qt_support import QGuiApplication, app, flush_deletes, spin, wait  # noqa: E402
 
 if QGuiApplication is not None:
-    from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QEvent, QMetaObject, QObject, Qt, QUrl, qInstallMessageHandler
+    from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QEvent, QMetaObject, QObject, QPointF, Qt, QUrl, qInstallMessageHandler
     from PySide6.QtGui import QAccessible, QColor, QImage, QKeyEvent
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuick import QQuickItem
@@ -40,7 +40,8 @@ class WindowCase(unittest.TestCase):
     """Una ventana por prueba; recoge los mensajes de QML para exigir que no haya avisos."""
 
     def setUp(self):
-        QQuickStyle.setStyle("Fusion")
+        if QQuickStyle.name() != "Fusion":
+            QQuickStyle.setStyle("Fusion")
         app()
         self.messages: list[str] = []
         self._old_handler = qInstallMessageHandler(lambda _mode, _ctx, m: self.messages.append(m))
@@ -86,6 +87,7 @@ class WindowCase(unittest.TestCase):
         self.engine.load(QUrl.fromLocalFile(str(MAIN)))
         self.assertTrue(self.engine.rootObjects(), self.messages)
         self.win = self.engine.rootObjects()[0]
+        self.win.resize(1440, 860)
         self.b.load()
 
     def quiet(self) -> bool:
@@ -452,7 +454,9 @@ class EditorUiFakeTest(WindowCase):
         size = self.item("size")
         self.assertIn("(this screen)", size.property("displayText"))
         self.key(size, Qt.Key.Key_Down)
+        self.assertTrue(self.b.previewStale)
         self.idle()
+        self.assertFalse(self.b.previewStale)
         self.assertNotEqual(self.log("preview")[-1][4], size.property("model")[0])
         self.assertEqual(self.log("preview")[-1][4], self.b.previewSize)
         self.assertNotIn("(this screen)", size.property("displayText"))
@@ -470,6 +474,42 @@ class EditorUiFakeTest(WindowCase):
         self.click(self.item("togglePreview"))
         self.idle()
         self.assertEqual(len(self.log("preview")), n + 1, "al volver a enseñarla, se pone al día")
+
+    def test_preview_keeps_scene_and_resolution_across_layouts(self):
+        self.loaded()
+        self.b.scenario = "sessions"
+        self.b.previewSize = "1366x768"
+        self.idle()
+        preview = self.item("preview")
+        shot = self.item("previewImage")
+        source = shot.property("source")
+        count = len(self.log("preview"))
+
+        self.click(self.item("expandPreview"))
+        self.assertTrue(preview.property("expanded"))
+        self.assertFalse(self.item("scroll").isVisible())
+        self.idle()
+        self.assertEqual(len(self.log("preview")), count)
+        self.assertEqual(shot.property("source"), source)
+        self.click(self.item("expandPreview"))
+
+        self.win.resize(360, 420)
+        spin(0.1)
+        self.assertFalse(preview.isVisible())
+        self.assertFalse(self.b.previewEnabled)
+        self.click(self.item("togglePreview"))
+        self.idle()
+        self.assertTrue(preview.isVisible())
+        self.assertEqual(self.b.scenario, "sessions")
+        self.assertEqual(self.b.previewSize, "1366x768")
+        self.assertEqual(cpp(shot), cpp(self.item("previewImage")))
+
+        self.click(self.item("togglePreview"))
+        self.assertTrue(self.item("scroll").isVisible())
+        section_picker = self.item("sectionPicker")
+        section_picker.forceActiveFocus()
+        self.key(section_picker, Qt.Key.Key_Down)
+        self.assertEqual(self.item("pageTitle").property("text"), "Clock")
 
     def test_try_in_a_window(self):
         self.loaded()
@@ -559,7 +599,7 @@ class EditorUiFakeTest(WindowCase):
         self.assertFalse(row.isVisible())
         self.item("search").setProperty("text", "pict")
         spin(0.05)
-        self.assertTrue(row.isVisible())
+        self.assertTrue(self.item("field-avatar").isVisible())
         self.assertEqual(self.item("pageTitle").property("text"), "1 result")
 
     def test_wallpaper_dialog(self):
@@ -924,6 +964,47 @@ QtObject {
         self.key(sysitem, Qt.Key.Key_Space)
         self.idle()
         self.assertTrue(self.item("installedText").isVisible() or self.item("notInstalled").isVisible())
+
+    def test_focus_scrolls_to_the_focused_setting(self):
+        self.open(program=str(CLI))
+        self.ready()
+        self.win.resize(360, 420)
+        self.win.setProperty("selectedGroup", "clock")
+        spin(0.25)
+        scroll = self.item("scroll")
+        field = self.control("clockOffsetY", "number")
+        self.assertGreater(field.mapToItem(scroll, QPointF()).y(), scroll.height())
+        field.forceActiveFocus(Qt.FocusReason.TabFocusReason)
+        spin(0.1)
+        top = field.mapToItem(scroll, QPointF()).y()
+        self.assertGreaterEqual(top, 0)
+        self.assertLessEqual(top + field.height(), scroll.height())
+
+    def test_every_schema_group_fits_at_each_window_size(self):
+        self.open(program=str(CLI))
+        self.ready()
+        self.win.setProperty("reduceMotion", True)
+        self.assertEqual(self.win.property("tones").property("duration"), 0)
+        for width, height in ((360, 420), (640, 480), (1024, 680), (1180, 700), (1440, 860)):
+            self.win.resize(width, height)
+            for group in self.b.groups:
+                group_id = group["id"]
+                self.win.setProperty("selectedGroup", group_id)
+                spin(0.045)
+                fields = self.visible_items("field-")
+                expected = {"field-" + key for key in self.b.order if self.b.keys[key]["group"] == group_id}
+                if group_id == "users":
+                    expected.add("field-avatar")
+                self.assertEqual({field.objectName() for field in fields}, expected)
+                for field in fields:
+                    for control in self.items(field):
+                        if not control.isVisible() or control.property("focusPolicy") is None:
+                            continue
+                        left = control.mapToItem(field, QPointF()).x()
+                        right = left + control.width()
+                        context = (width, group_id, field.objectName(), control.objectName())
+                        self.assertGreaterEqual(left, -1, context)
+                        self.assertLessEqual(right, field.width() + 1, context)
 
     def tones(self) -> dict:
         t = self.win.property("tones")

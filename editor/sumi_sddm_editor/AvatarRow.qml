@@ -1,94 +1,81 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 
-/**
- * El avatar no es una clave del tema: es de AccountsService (`sumi-sddm avatar info|set|clear`, sin contraseña).
- * Va como primera fila del grupo Users, como en Settings. La CLI lo recorta a un cuadrado de 512 px; el greeter lo
- * enseña en un círculo. También se puede soltar una imagen sobre la fila.
- */
+// The avatar lives in AccountsService and uses the CLI's separate avatar commands.
 Item {
     id: root
 
     required property var backend
+    property bool divider: false
+
+    implicitHeight: row.implicitHeight
+    implicitWidth: row.implicitWidth
 
     readonly property var info: root.backend.avatar
     readonly property bool exists: !!(root.info && root.info.exists)
-    readonly property string caption: { root.backend.avatar; return root.backend.captionFor("avatar"); }
-    /** Otra URL en cada cambio: el archivo de AccountsService se llama igual antes y después. */
     property int serial: 0
 
-    /** Lo que pasa al elegir (diálogo) o soltar (arrastrar) una imagen. */
     function choose(url) { root.backend.setAvatar(url); }
 
     objectName: "field-avatar"
-    implicitHeight: row.implicitHeight + 12
+    SettingsRow {
+        id: row
+        anchors.fill: parent
+        divider: root.divider
+
+        title: "Avatar"
+        description: root.info ? root.backend.captionFor("avatar") : ""
+        descriptionColor: root.info && root.info.error ? Tones.error : Tones.muted
+        modified: root.exists
+
+        control: RowLayout {
+            spacing: Tones.gap
+            Rectangle {
+                objectName: "avatarFrame"
+                implicitWidth: 42
+                implicitHeight: width
+                radius: width / 2
+                color: Tones.control
+                clip: true
+                SettingsIcon { name: "users"; visible: !root.exists; anchors.centerIn: parent }
+                Image {
+                    objectName: "avatarImage"
+                    anchors.fill: parent
+                    visible: root.exists
+                    source: root.exists ? "file://" + String(root.info.iconFile) + "?v=" + root.serial : ""
+                    fillMode: Image.PreserveAspectCrop
+                    sourceSize: Qt.size(96, 96)
+                    cache: false
+                    asynchronous: true
+                    Accessible.role: Accessible.Graphic
+                    Accessible.name: "Your picture"
+                }
+            }
+            ActionButton {
+                objectName: "chooseAvatar"
+                text: "Choose picture…"
+                Accessible.name: "Choose your picture"
+                onClicked: pictures.open()
+            }
+            ActionButton {
+                objectName: "removeAvatar"
+                visible: root.exists
+                text: "Remove"
+                flat: true
+                tone: Tones.error
+                Accessible.name: "Remove your picture"
+                onClicked: root.backend.clearAvatar()
+            }
+            Item { Layout.fillWidth: true }
+        }
+    }
 
     Connections {
         target: root.backend
         function onAvatarChanged() { root.serial++; }
-    }
-
-    RowLayout {
-        id: row
-        anchors.fill: parent
-        anchors.topMargin: 6
-        anchors.bottomMargin: 6
-        spacing: 12
-
-        Rectangle {
-            objectName: "avatarFrame"
-            implicitWidth: 48
-            implicitHeight: 48
-            radius: 24
-            color: palette.mid
-            clip: true
-            Image {
-                objectName: "avatarImage"
-                anchors.fill: parent
-                visible: root.exists
-                source: root.exists ? "file://" + String(root.info.iconFile) + "?v=" + root.serial : ""
-                fillMode: Image.PreserveAspectCrop
-                sourceSize: Qt.size(96, 96)
-                cache: false
-                asynchronous: true
-                Accessible.role: Accessible.Graphic
-                Accessible.name: "Your picture"
-            }
-        }
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 2
-            Label {
-                text: "Avatar"
-                font.weight: Font.DemiBold
-            }
-            Label {
-                objectName: "caption"
-                visible: text.length > 0
-                text: root.caption
-                color: root.info && root.info.error ? Tones.error : palette.placeholderText
-                wrapMode: Text.Wrap
-                font.pointSize: Qt.application.font.pointSize * 0.9
-                Layout.fillWidth: true
-            }
-        }
-        Button {
-            objectName: "chooseAvatar"
-            text: "Choose picture…"
-            Accessible.name: "Choose your picture"
-            onClicked: pictures.open()
-        }
-        Button {
-            objectName: "removeAvatar"
-            visible: root.exists
-            text: "Remove"
-            Accessible.name: "Remove your picture"
-            onClicked: root.backend.clearAvatar()
-        }
     }
 
     FileDialog {
@@ -107,9 +94,9 @@ Item {
     Rectangle {
         anchors.fill: parent
         visible: drop.containsDrag
-        color: "transparent"
-        border.width: 2
-        border.color: palette.highlight
-        radius: 4
+        color: Tones.unfilled
+        border.width: Tones.focusStroke
+        border.color: Tones.accent
+        radius: Tones.controlRadius
     }
 }

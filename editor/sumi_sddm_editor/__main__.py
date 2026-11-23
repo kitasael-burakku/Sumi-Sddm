@@ -22,7 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         QQuickStyle.setStyle("Fusion")
     app = QGuiApplication(argv)
     app.setApplicationName("sumi-sddm-editor")
-    app.setApplicationDisplayName("Login Screen (Sumi)")
+    app.setApplicationDisplayName("Sumi Settings")
     app.setDesktopFileName("sumi-sddm-editor")
     # El del tema de iconos (el paquete lo instala en hicolor); desde el repositorio, el SVG de editor/.
     icon = QIcon.fromTheme("sumi-sddm-editor")
@@ -32,10 +32,14 @@ def main(argv: list[str] | None = None) -> int:
 
     backend = Backend()
     engine = QQmlApplicationEngine()
-    engine.setInitialProperties({"backend": backend})
+    engine.setInitialProperties({
+        "backend": backend,
+        "reduceMotion": os.environ.get("SUMI_SETTINGS_REDUCE_MOTION") == "1",
+    })
     engine.load(QUrl.fromLocalFile(str(HERE / "Main.qml")))
     if not engine.rootObjects():
         return 1
+
     app.aboutToQuit.connect(backend.shutdown)
     backend.load()
     code = app.exec()
