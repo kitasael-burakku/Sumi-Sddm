@@ -4,8 +4,8 @@ Tema de inicio de sesión para SDDM (≥ 0.21, Qt 6): minimalista, con una notch
 autenticación. Compatible con Sumi Shell, pero **independiente**: no usa Quickshell, Hyprland ni ningún
 servicio de Sumi.
 
-> Estado: Fase 5. El tema está **instalado (paquete) y activo** en esta máquina; recuperación en
-> [docs/RECUPERACION.md](docs/RECUPERACION.md).
+> Estado: Fases 1–6 completas. Instalado (paquete) y activo en esta máquina, probado en real; informe final en
+> [docs/FASE6-PRUEBAS.md](docs/FASE6-PRUEBAS.md) y recuperación en [docs/RECUPERACION.md](docs/RECUPERACION.md).
 
 ## Estructura
 

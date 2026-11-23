@@ -2,12 +2,13 @@
 #   cd packaging/arch && makepkg            # construir (sin root)
 #   sudo pacman -U sumi-sddm-*.pkg.tar.zst  # instalar: NO activa el tema (eso es `sumi-sddm system activate`)
 pkgname=sumi-sddm
-pkgver=$(tr -d '[:space:]' < "${startdir:-.}/../../VERSION")
-pkgrel=1
+# Literal (namcap analiza el PKGBUILD sin coreutils); tests/py/test_packaging.py exige que coincida con VERSION.
+pkgver=0.4.2
+pkgrel=2
 pkgdesc="Minimal SDDM login theme with a top notch, plus a polkit helper to apply its settings"
 arch=('any')
 url=""   # sin repositorio público todavía
-# La licencia del proyecto está pendiente de decidir por su autor; Inter va con la SIL OFL 1.1.
+# El proyecto será MIT al publicarse (LICENSE-PENDING lo explica); Inter va con la SIL OFL 1.1.
 license=('LicenseRef-pending' 'OFL-1.1')
 depends=('sddm' 'qt6-declarative' 'python' 'polkit' 'util-linux' 'systemd')
 optdepends=('qt6-imageformats: WebP wallpapers')
@@ -19,6 +20,7 @@ _src() { realpath "$startdir/../.."; }
 check() {
   cd "$(_src)"
   python3 -B tools/sumi-sddm gen --check
+  [ "$(tr -d '[:space:]' < VERSION)" = "$pkgver" ] || { echo "pkgver ≠ VERSION"; return 1; }
   python3 -B -m unittest discover -s tests/py -p 'test_helper.py'
 }
 
@@ -42,5 +44,6 @@ package() {
   install -Dm0644 "$src/system/org.sumi.sddm.helper.policy" \
     "$pkgdir/usr/share/polkit-1/actions/org.sumi.sddm.helper.policy"
   install -Dm0644 "$src/theme/sumi/assets/fonts/OFL.txt" "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
+  install -Dm0644 "$src/LICENSE-PENDING" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-PENDING"
   install -Dm0644 "$src/docs/RECUPERACION.md" "$pkgdir/usr/share/doc/$pkgname/RECUPERACION.md"
 }

@@ -32,14 +32,20 @@ class GreeterLogTest(unittest.TestCase):
         self.assertEqual(s["sessions"], ["hyprland.desktop"])
 
     def test_failed_then_ok_and_reboot_request(self):
-        s = greeterlog.summarize([g(THEME), g(READY),
+        # Como lo registra SDDM 0.21 (visto en la prueba B1): LoginFailed dos veces por intento y usuario vacío.
+        s = greeterlog.summarize([g(THEME), g(READY), d("Message received from greeter: Login"),
+                                  d('Authentication error: SDDM::Auth::ERROR_AUTHENTICATION "Authentication failure"'),
+                                  d('Authentication for user  ""  failed'),
+                                  g('Information Message received from daemon:  "Authentication failure"'),
                                   g("Message received from daemon: LoginFailed"),
-                                  g("Message received from daemon: InformationMessage"),
+                                  g("Message received from daemon: LoginFailed"),
+                                  d("Message received from greeter: Login"),
+                                  d('Authentication for user  "someone"  successful'),
                                   g("Message received from daemon: LoginSucceeded"),
                                   d("Message received from greeter: Reboot")], 7, uid="960")
         self.assertEqual(s["logins"], {"succeeded": 1, "failed": 1})
         self.assertEqual(s["informationMessages"], 1)
-        self.assertEqual(s["requests"], {"Reboot": 1})
+        self.assertEqual(s["requests"], {"Login": 2, "Reboot": 1})
 
     def test_qml_warning_and_wrong_custom_are_problems(self):
         s = greeterlog.summarize([g(THEME), g(READY.replace("custom=7", "custom=3")),

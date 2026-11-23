@@ -36,12 +36,77 @@ un reinicio. Lo hecho hasta aquí no lo necesita.
 - **C2 (pendiente del autor).** `sudo pacman -S namcap`, y después revisaré el paquete.
 - **C3 (decidido).** MIT, que se añadirá al publicar Sumi Shell y Sumi SDDM.
 
-## Pendiente (con el autor presente)
+## Parte B — en real, con el autor
 
-- **Instalar 0.4.2:** `sudo pacman -U build/sumi-sddm-0.4.2-1-any.pkg.tar.zst`.
-- **B1:** contraseña incorrecta y Bloq Mayús.
-- **B2:** sólo teclado.
-- **B3:** sesión desde la notch.
-- **B5:** Settings en la sesión.
-- **B4:** energía; reinicia el equipo.
-- **Después de cada una:** compruebo con `sumi-sddm system log`.
+### C2: namcap (2026-11-22)
+
+- **Paquete:** el error de licencia se corrigió.
+  - `LicenseRef-pending` ahora va con `/usr/share/licenses/sumi-sddm/LICENSE-PENDING`, una nota hasta que se
+    publique con MIT.
+  - El paquete pasa a `0.4.2-2` y sólo añade esa nota.
+- **Avisos que quedan, falsos positivos:**
+  - los módulos `sumiconf.*` son privados del paquete (`/usr/lib/sumi-sddm/tools`) y el helper los carga él mismo;
+  - `sddm`, `polkit`, `util-linux` y `systemd` se usan en ejecución (el tema, la acción, `setpriv`, `journalctl`).
+- **PKGBUILD:** `pkgver` ya no se calcula con `tr` (namcap no lo tiene). Es literal, y
+  `tests/py/test_packaging.py` exige que coincida con `VERSION`.
+- **Avisos del PKGBUILD para cuando se publique:** «File referenced in $startdir» (es local a propósito),
+  «Missing url» y «Missing Maintainer tag».
+
+### B5: Settings en la sesión (2026-11-22, 21:46)
+
+- **Lo que vio el autor:** «In use» y «Shows your current settings»; la miniatura redonda del avatar se ve; un
+  cambio deja «Apply» disponible; «Apply» → diálogo de polkit de la shell → aplicado; Environment muestra
+  «Login screen theme».
+- **Comprobado:**
+  - el journal registra `pkexec … sumi-sddm-helper apply` a las 21:46:50, desde la shell (CWD `~`);
+  - `system status` da `inSync` y `active`;
+  - la shell no registró avisos nuevos.
+
+### B1 + B2 + B3: teclado, sesiones y contraseña incorrecta (2026-11-22, arranque de las 21:51)
+
+- **Lo que vio el autor:** todo bien (escribir sin clic, Esc, Tab y Mayús+Tab, ← →, la lista de sesiones con
+  Esc sin cambiar, el aviso de Bloq Mayús, el error con la contraseña incorrecta y después la correcta).
+- **`system log`:** Sumi OK (`custom=7`, 0 avisos); **2 inicios fallidos y 1 correcto**; sesión
+  `hyprland.desktop` en los tres (Esc en la lista no la cambió).
+- **Corregido en `system log`, encontrado en esta prueba:**
+  - SDDM 0.21 envía `LoginFailed` **dos veces** por intento fallido, y el primer resumen contaba 4;
+  - los mensajes de información los escribe como «Information Message received…», con otro formato.
+  - Ahora los intentos se cuentan con las líneas «Authentication … successful/failed» del daemon (una por
+    intento, sin guardar nombres), con una prueba sintética que reproduce el registro real.
+- **Usuario vacío en los fallos.** El daemon escribe `Authentication for user "" failed`: en un fallo, el helper
+  de SDDM no informa del usuario. El tema envía siempre el usuario seleccionado, y el intento correcto, con el
+  mismo código, salió con el nombre.
+
+### B4: energía desde la notch (2026-11-22)
+
+- **Lo que vio el autor:** «Restart» y «Shut down» piden confirmación; Cancelar/Esc vuelve sin hacer nada;
+  confirmar «Restart» reinicia.
+- **`system log --boot -1`** (arranque de 21:57:32 a 21:58:34):
+  - Sumi OK, `custom=7`;
+  - peticiones del greeter: sólo `Connect` y `Reboot`×1. Las cancelaciones no enviaron nada, y no hubo ningún
+    `PowerOff`.
+- **El daemon:** a las 21:58:32 recibe `Reboot` → systemd detiene SDDM → reinicio.
+- **Arranque siguiente** (21:58:57): Sumi OK, `custom=7`, 1 inicio de sesión correcto en `hyprland.desktop`.
+
+## Cierre de la Fase 6
+
+Todo lo que el autor podía comprobar en real está comprobado:
+- el greeter con el tema y la configuración;
+- inicio de sesión correcto e incorrecto, Bloq Mayús;
+- teclado;
+- sesiones;
+- reiniciar, y apagar hasta la confirmación;
+- avatar;
+- Settings en la sesión con «Apply» y polkit.
+
+Automatizado: `check` (Python 80, QML 57 + 57, 5 smokes con el greeter real, uno con dos pantallas), el banco de
+Settings (78 + 12 + 12 + 20 y recarga en caliente) y el banco de navegación de Quickshell (227).
+
+Queda fuera, como límite declarado:
+
+| Límite | Por qué |
+|---|---|
+| Varios monitores **físicos** | Sólo hay un monitor. Probado con el greeter real y pantallas offscreen |
+| Lector de pantalla real | No se ha probado con uno. Sí se comprueban roles y etiquetas en cinco estados |
+| Apagar de verdad | Sólo hasta la confirmación; el reinicio sí se confirmó |
+| Publicación | Licencia MIT, `url` y `Maintainer` del PKGBUILD y fuente no local: cuando el autor publique |

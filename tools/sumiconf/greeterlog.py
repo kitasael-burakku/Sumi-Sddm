@@ -21,6 +21,10 @@ THEME_RE = re.compile(r"Loading (file://\S+/)Main\.qml")
 FROM_GREETER_RE = re.compile(r"Message received from greeter: (\w+)")
 FROM_DAEMON_RE = re.compile(r"Message received from daemon: (\w+)")
 SESSION_RE = re.compile(r'Session "([^"]+)" selected')
+# Una línea del daemon por intento. (El greeter recibe LoginFailed DOS veces por intento fallido en SDDM 0.21, y
+# en un fallo el helper de SDDM informa de un usuario vacío: no se cuenta por el greeter ni se guarda el nombre.)
+AUTH_RE = re.compile(r"Authentication for user .* (successful|failed)\s*$")
+INFO = "Information Message received from daemon"
 
 
 def read_journal(boot: int) -> list[dict]:
@@ -59,6 +63,7 @@ def summarize(entries: list[dict], expect_custom: int | None, theme_name: str = 
     requests: Counter = Counter()
     replies: Counter = Counter()
     sessions: list[str] = []
+    auth: Counter = Counter()
     for e in entries:
         m = e["message"]
         if e["id"] == GREETER_ID:
@@ -69,6 +74,8 @@ def summarize(entries: list[dict], expect_custom: int | None, theme_name: str = 
             r = FROM_DAEMON_RE.search(m)
             if r:
                 replies[r.group(1)] += 1
+            if INFO in m:
+                replies["InformationMessage"] += 1
         elif e["id"] == DAEMON_ID:
             r = FROM_GREETER_RE.search(m)
             if r:
@@ -76,6 +83,9 @@ def summarize(entries: list[dict], expect_custom: int | None, theme_name: str = 
             s = SESSION_RE.search(m)
             if s:
                 sessions.append(s.group(1).rsplit("/", 1)[-1])
+            a = AUTH_RE.search(m)
+            if a:
+                auth[a.group(1)] += 1
     runs = []
     for pid, lines in greeters.items():
         theme = next((t.group(1) for l in lines for t in [THEME_RE.search(l)] if t), "")
@@ -87,7 +97,8 @@ def summarize(entries: list[dict], expect_custom: int | None, theme_name: str = 
                      "ready": ready.strip(), "problems": problems[:10]})
     sumi = [r for r in runs if r["sumi"]]
     return {"greeters": runs, "sumiOk": bool(sumi) and all(r["ok"] for r in sumi),
-            "requests": dict(requests), "logins": {"succeeded": replies.get("LoginSucceeded", 0),
-                                                   "failed": replies.get("LoginFailed", 0)},
+            "requests": dict(requests),
+            "logins": {"succeeded": auth.get("successful", replies.get("LoginSucceeded", 0)),
+                       "failed": auth.get("failed", 0) if auth else replies.get("LoginFailed", 0)},
             "informationMessages": replies.get("InformationMessage", 0), "sessions": sessions,
             "expectCustom": expect_custom}
