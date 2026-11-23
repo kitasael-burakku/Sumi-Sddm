@@ -158,7 +158,28 @@ def font_warning(schema: Schema, user: dict) -> list[dict]:
     if known.get(fam):
         return []
     why = "only installed in your home folder" if fam in known else "not installed"
-    return [{"key": "fontFamily", "message": f"“{fam}” is {why}: the login screen will use another font"}]
+    w = {"key": "fontFamily", "message": f"“{fam}” is {why}: the login screen will use another font"}
+    hint = suggest_font(fam, [f for f, system in known.items() if system])
+    if hint:
+        w["suggestion"] = hint
+        w["message"] += f" · did you mean “{hint}”?"
+    return [w]
+
+
+def suggest_font(name: str, families: list[str]) -> str:
+    """La familia instalada más parecida: la que empieza igual (la más corta: «Maple Mono» → «Maple Mono NF»),
+    la que coincide sin mayúsculas ni espacios, o la más cercana por difflib. "" si ninguna se parece."""
+    import difflib
+    key = name.casefold()
+    squash = lambda s: re.sub(r"[\s_-]+", "", s.casefold())
+    exact = [f for f in families if squash(f) == squash(name)]
+    if exact:
+        return exact[0]
+    prefix = sorted((f for f in families if f.casefold().startswith(key)), key=lambda f: (len(f), f))
+    if prefix:
+        return prefix[0]
+    close = difflib.get_close_matches(key, [f.casefold() for f in families], n=1, cutoff=0.75)
+    return next((f for f in families if f.casefold() == close[0]), "") if close else ""
 
 
 def cmd_version(args) -> int:

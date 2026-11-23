@@ -216,7 +216,21 @@ class FontsTest(Base):
         self.assertEqual([x["key"] for x in w], ["fontFamily"])
         self.assertIn("home folder", w[0]["message"])
         self.ok("config", "set", "fontFamily=Not There")
-        self.assertIn("not installed", self.ok("config", "show")["warnings"][0]["message"])
+        w = self.ok("config", "show")["warnings"][0]
+        self.assertIn("not installed", w["message"])
+        self.assertNotIn("suggestion", w, "nada parecido, nada sugerido")
+
+    def test_font_warning_suggests_the_installed_name(self):
+        self.fake_fc_list()
+        for typed, want in (("Noto", "Noto Sans"), ("noto sans display", "Noto Sans Display"),
+                            ("NotoSans", "Noto Sans"), ("Inter Variabel", "Inter Variable")):
+            with self.subTest(typed=typed):
+                self.ok("config", "set", "fontFamily=" + typed)
+                w = self.ok("config", "show")["warnings"][0]
+                self.assertEqual(w["suggestion"], want)
+                self.assertIn(f"did you mean “{want}”", w["message"])
+        self.ok("config", "set", "fontFamily=Home")    # sólo en el $HOME: no se sugiere
+        self.assertNotIn("suggestion", self.ok("config", "show")["warnings"][0])
 
     def test_missing_fc_list(self):
         empty = self.home / "nobin"
