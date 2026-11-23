@@ -22,6 +22,9 @@ Item {
     property string key: ""
     property bool focused: false
     property real availableWidth: 0
+    /** Lo más que debe medir el control para quedarse en la línea del nombre (la ventana Login screen, 2026-11-23);
+     *  0 = el tamaño de siempre (Settings). Sólo encoge el deslizador, entre 96 y 180 px. */
+    property real fitWidth: 0
     /** Terminó la edición de un campo de texto: Settings recupera el teclado. */
     signal finished()
 
@@ -90,7 +93,9 @@ Item {
             spacing: 10 * root.s
             Slider {
                 anchors.verticalCenter: parent.verticalCenter
-                width: 180 * root.s
+                width: root.fitWidth > 0
+                    ? Math.max(96 * root.s, Math.min(180 * root.s, root.fitWidth - num.spacing - numText.width))
+                    : 180 * root.s
                 s: root.s
                 value: (Number(root.value) - num.lo) / num.span
                 step: num.stepv / num.span

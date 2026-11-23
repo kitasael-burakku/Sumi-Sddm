@@ -139,3 +139,13 @@ Incluyen el trabajo sin commitear de la navegación de Settings, y la entrega va
 Pendiente del autor:
 - **Mirar la página en la sesión.** No se abrió Settings.
 - **Commit en dotfiles** con `dotbackup`. Incluirá también tu trabajo de la navegación, que ya estaba sin commitear.
+
+### Ventana propia en Sumi Shell (2026-11-23)
+
+La página de Settings descrita arriba se sustituyó por una **ventana flotante Login screen** en Sumi Shell (ADR-41 e
+informe `docs/SUMI-LOGIN-UI-2026-11-23.md` del repo de Sumi Shell). Settings queda como resumen (estado, «Open Login
+screen», Apply/Use/Restore). La ventana añade vista previa al tamaño del monitor con las 16 escenas de la CLI, errores
+por clave con `message`/`fields` (0.6.1) y el último arranque del greeter (`system log`). Las copias de
+`integration/sumi-shell/services/SddmTheme.qml` y `components/SddmField.qml` se actualizaron en la misma entrega.
+`bench/` se rehízo para la página resumen; `edit.py` queda como registro. `system log` marca un falso positivo tras aplicar con la sesión abierta:
+[PROBLEMA-LOG-CUSTOM-2026-11-23.md](PROBLEMA-LOG-CUSTOM-2026-11-23.md).

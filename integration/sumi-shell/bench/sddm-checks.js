@@ -1,21 +1,17 @@
-// Pasos del banco de Settings → Login screen. Cada paso devuelve false para «aún no» (se reintenta) y lo demás avanza.
-// Sólo se tocan el HOME y el XDG privados del banco.
+// Pasos del banco de Settings → Login screen (Sumi SDDM). Cada paso devuelve false para «aún no» (se reintenta) y lo demás
+// avanza. Sólo se tocan el HOME y el XDG privados del banco.
+//
+// 2026-11-23: desde la ventana propia de Sumi Shell (ADR-41) la página es un resumen: estado, «Open Login screen» y
+// Apply / Use / Restore. Las claves, la vista previa, Reset y el avatar están en la ventana (su banco es
+// tools/login-ui/window-bench.py del repo de Sumi Shell); aquí se prueban la página y, por el servicio que comparten
+// (SddmTheme), los caminos que llegan a la CLI real: escritura agrupada, conflicto, rechazo, wallpaper, reset, avatar.
 
-function cases(w, sddm, settings) {
+function cases(w, sddm, settings, ui) {
     const p = w.page, test = (c, label) => w.assertThat(c, label);
     const steps = [];
     const step = (label, fn, timeout) => steps.push({ label: label, fn: fn, timeout: timeout });
-    const idle = () => !sddm.busy && sddm.ready;
-    const tabs = () => p.sectionTabs.map(t => t.key).join("|");
-    const shots = name => {
-        for (const t of ["Overview", "Look", "Notch and clock", "Users and power", "Behaviour"]) {
-            step("pestaña " + t, () => { test(p.selectTab(t), "pestaña " + t); });
-            step("captura " + t, () => {
-                if (t === "Overview" && (sddm.previewStale || sddm.previewUrl === "")) return false;
-                w.shot(name + "-" + t.replace(/ /g, "-").toLowerCase() + ".png");
-            }, 30000);
-        }
-    };
+    const idle = () => !sddm.busy && sddm.ready && sddm.systemBusy === "";
+    const rowIds = () => p.searchIndex.filter(e => e.kind === "row" && e.path.indexOf("shell/sddm/") === 0).map(e => e.id);
     const cli = (label, argv, check) => {
         step(label + " (orden)", () => { w.run(["sumi-sddm"].concat(argv).concat(["--json"])); });
         step(label, () => { if (w.external === null) return false; check(w.external.doc || {}, w.external); });
@@ -25,6 +21,9 @@ function cases(w, sddm, settings) {
         test(p.openPath("shell/sddm"), "abrir shell/sddm");
         test(p.shownKey === "shell/sddm", "página Login screen a la vista");
         test(sddm.watching, "la página reclama el servicio");
+        test(rowIds().join(",") === "sddmStatus,sddmApplied,sddmOpen,sddmApply,sddmActivate,sddmDeactivate",
+             "filas: " + rowIds().join(","));
+        test(p.sectionTabs.length <= 1, "sin pestañas");
     });
 
     if (w.scenario === "missing" || w.scenario === "incompatible") {
@@ -37,14 +36,11 @@ function cases(w, sddm, settings) {
             const cap = p.captionOf({ id: "sddmStatus" });
             test(want === "missing" ? cap.indexOf("install --user") >= 0 : cap.indexOf("version 2") >= 0,
                  "el pie explica qué hacer: " + cap);
-            test(p.rowReason({ id: "sddmReset", kind: "action" }).length > 0, "las acciones quedan desactivadas");
+            test(p.rowReason({ id: "sddmApply", kind: "action" }).length > 0, "las acciones quedan desactivadas");
+            test(p.rowReason({ id: "sddmOpen", kind: "action" }) === "", "Open sigue disponible (la ventana lo explica)");
             test(sddm.rows("notch").length === 0, "sin esquema, sin filas de claves");
         });
         step("captura", () => { w.shot(want + ".png"); });
-        for (const t of ["Look", "Behaviour"]) {
-            step("pestaña " + t, () => { test(p.selectTab(t), "pestaña " + t); });
-            step("captura " + t, () => { w.shot(want + "-" + t.toLowerCase() + ".png"); });
-        }
         step("cerrar la página", () => {
             test(p.openPath("shell/general"), "volver a General");
             test(!sddm.watching, "al salir se suelta el servicio");
@@ -55,9 +51,9 @@ function cases(w, sddm, settings) {
     step("cargar", () => {
         if (!sddm.ready) return false;
         test(sddm.order.length === 41 && sddm.groups.length === 9, "esquema: 41 claves en 9 grupos");
-        test(tabs() === "Overview|Look|Notch and clock|Users and power|Behaviour", "pestañas: " + tabs());
         test(sddm.customCount === 0 && sddm.stamp.length === 32, "configuración vacía con huella");
         test(p.infoValue({ id: "sddmStatus" }).indexOf("Version ") === 0, "estado con versión");
+        test(!sddm.previewing && sddm.previewUrl === "", "Settings no genera vista previa");
     });
     step("estado del sistema (falso)", () => {
         if (sddm.system === null || sddm.avatar === null) return false;
@@ -67,65 +63,27 @@ function cases(w, sddm, settings) {
         test(p.rowReason({ id: "sddmApply", kind: "action" }) === "The login screen already has your settings", "Apply desactivado");
         test(p.rowReason({ id: "sddmActivate", kind: "action" }) === "", "Use disponible");
         test(p.rowReason({ id: "sddmDeactivate", kind: "action" }) === "Sumi isn't your login screen", "Restore desactivado");
-        test(sddm.avatar.exists === false, "sin avatar");
+        test(p.captionOf({ id: "sddmOpen" }).indexOf("in their own window") > 0, "pie de Open");
     });
-    shots(w.scenario);
+    step("captura", () => { w.shot(w.scenario + "-page.png"); });
     if (w.scenario !== "real") {
         step("cerrar", () => { test(p.openPath("shell/general") && !sddm.watching, "soltar al salir"); });
         return steps;
     }
 
-    // ── un interruptor de verdad, con el puntero ──
-    step("pestaña Notch and clock", () => { test(p.selectTab("Notch and clock"), "pestaña"); });
-    step("clic en Seconds", () => {
-        const f = w.field("clockSeconds");
-        test(f && f.type === "bool", "fila clockSeconds con interruptor");
-        w.click(f.children[0].item);
-        test(sddm.valueOf("clockSeconds") === true && sddm.isSet("clockSeconds"), "el clic cambia la vista al momento");
-    });
-    step("guardado", () => idle() && sddm.writeCount >= 1 ? true : false);
-    cli("persistido", ["config", "get", "clockSeconds"], d => test(d.value === true && d.set === true, "clockSeconds=true en disco"));
-
-    // ── un deslizador arrastrado: la fila no se rehace y se escribe agrupado ──
-    let rowBefore = null, writesBefore = 0;
-    step("arrastrar Corner radius", () => {
-        const f = w.field("notchRadius");
-        test(!!f, "fila notchRadius");
-        rowBefore = p.rowItems["sddm:notchRadius"];
+    // ── escrituras por el servicio: agrupadas y persistidas ──
+    let writesBefore = 0;
+    step("doce cambios seguidos", () => {
         writesBefore = sddm.writeCount;
-        const slider = f.children[0].item.children[0];
-        const y = slider.height / 2;
-        w.pointer.mousePress(slider, 4, y, Qt.LeftButton, Qt.NoModifier, 0);
-        for (let i = 1; i <= 12; i++) w.pointer.mouseMove(slider, 4 + i * (slider.width - 8) / 12, y, 0, Qt.LeftButton, Qt.NoModifier);
-        w.pointer.mouseRelease(slider, slider.width - 4, y, Qt.LeftButton, Qt.NoModifier, 0);
-        test(sddm.valueOf("notchRadius") >= 44, "el arrastre lleva el radio arriba (" + sddm.valueOf("notchRadius") + ")");
+        for (let i = 1; i <= 12; i++) sddm.set("notchRadius", 20 + i * 2);
+        sddm.set("clockSeconds", true);
+        test(sddm.valueOf("notchRadius") === 44 && sddm.isSet("clockSeconds"), "la vista cambia al momento");
     });
-    step("arrastre guardado", () => {
+    step("una escritura", () => {
         if (!idle() || sddm.writeCount === writesBefore) return false;
-        test(p.rowItems["sddm:notchRadius"] === rowBefore, "la fila sobrevive al arrastre (no se recrea)");
-        test(sddm.writeCount - writesBefore === 1, "doce movimientos, una escritura (" + (sddm.writeCount - writesBefore) + ")");
+        test(sddm.writeCount - writesBefore === 1, "trece cambios, una escritura (" + (sddm.writeCount - writesBefore) + ")");
     });
-    cli("radio en disco", ["config", "get", "notchRadius"], d => test(d.value === sddm.valueOf("notchRadius"), "notchRadius en disco = vista"));
-
-    // ── teclado: la fila de Format con → ──
-    step("teclado en Format", () => {
-        test(p.openPath("shell/sddm/sddm:clockFormat"), "ruta a la fila de Format");
-        p.setZone("content");
-        test(p.currentRowId() === "sddm:clockFormat", "foco en Format (" + p.currentRowId() + ")");
-        w.key(Qt.Key_Right);
-        test(sddm.valueOf("clockFormat") === "12h", "→ cambia a 12 h");
-    });
-    step("teclado guardado", () => idle());
-    cli("formato en disco", ["config", "get", "clockFormat"], d => test(d.value === "12h", "clockFormat=12h en disco"));
-
-    // ── restablecer una clave con el botón de la fila ──
-    step("restablecer Seconds", () => {
-        const row = p.rowItems["sddm:clockSeconds"];
-        test(row && row.custom === true, "la fila se marca como personalizada");
-        row.resetRequested();
-        test(!sddm.isSet("clockSeconds"), "restablecer la vuelve al defecto");
-    });
-    step("restablecido guardado", () => idle());
+    cli("en disco", ["config", "get", "notchRadius"], d => test(d.value === 44, "notchRadius=44 en disco"));
 
     // ── un cambio desde la terminal entre medias: no se pisa ──
     cli("cambio externo", ["config", "set", "accentColor=#ff8800"], d => test(d.ok === true, "otra parte cambia el acento"));
@@ -136,15 +94,15 @@ function cases(w, sddm, settings) {
         test(sddm.valueOf("accentColor") === "#ff8800", "se recarga lo de fuera");
         test(sddm.valueOf("notchRadius") !== 30, "el cambio con huella vieja no se escribe");
     });
-    cli("acento conservado", ["config", "get", "accentColor"], d => test(d.value === "#ff8800", "el cambio externo sigue en disco"));
 
-    // ── un valor que la CLI rechaza ──
+    // ── un valor que la CLI rechaza: en inglés, junto a su clave y en el estado de la página ──
     step("valor inválido", () => { sddm.set("fontFamily", "Bad;Name"); });
     step("rechazo", () => {
         if (!idle()) return false;
         test(sddm.error.length > 0, "error visible: " + sddm.error);
+        test(sddm.fieldErrors["fontFamily"] !== undefined, "fieldErrors.fontFamily");
         test(sddm.valueOf("fontFamily") === "", "la vista vuelve a lo guardado");
-        test(p.captionOf({ id: "sddmStatus" }) === sddm.error, "el estado enseña el error");
+        test(p.captionOf({ id: "sddmStatus" }) === sddm.error, "el estado de la página enseña el error");
     });
 
     // ── wallpaper ──
@@ -154,29 +112,21 @@ function cases(w, sddm, settings) {
         test(sddm.valueOf("background") === "backgrounds/user.png", "background=backgrounds/user.png");
         test(sddm.error === "", "sin error");
     });
-    step("vista previa con wallpaper", () => {
-        if (sddm.previewStale) return false;
-        test(p.selectTab("Look"), "pestaña Look");
-    }, 30000);
-    step("captura con wallpaper", () => { w.shot("real-look-wallpaper.png"); });
-    step("pestaña Overview", () => { test(p.selectTab("Overview"), "Overview"); });
-    step("captura Overview con cambios", () => { if (sddm.previewStale) return false; w.shot("real-overview-changed.png"); }, 30000);
 
     // ── restablecer todo (dos pulsaciones) y deshacer ──
     let before = 0;
     step("reset armado", () => {
         before = sddm.customCount;
         test(before >= 3, "hay cambios (" + before + ")");
-        p.runAction("sddmReset");
+        sddm.resetAll();
         test(sddm.resetArmed && sddm.customCount === before, "la primera pulsación sólo arma");
-        test(p.captionOf({ id: "sddmReset" }).indexOf("Press again") === 0, "el pie lo pide");
     });
-    step("reset", () => { p.runAction("sddmReset"); });
+    step("reset", () => { sddm.resetAll(); });
     step("reset hecho", () => { if (!idle()) return false; test(sddm.customCount === 0, "todo al defecto"); });
-    step("restore", () => { p.runAction("sddmRestore"); });
+    step("restore", () => { sddm.restorePrevious(); });
     step("restore hecho", () => { if (!idle()) return false; test(sddm.customCount === before, "vuelve lo de antes"); });
 
-    // ── el sistema (falso): aplicar, usar y restaurar, sin pkexec real ──
+    // ── el sistema (falso) desde la página: aplicar, usar y restaurar, sin pkexec real ──
     step("hay algo que aplicar", () => {
         if (!idle() || sddm.system === null) return false;
         test(sddm.system.inSync === false, "tras los cambios, lo aplicado ya no coincide");
@@ -206,8 +156,7 @@ function cases(w, sddm, settings) {
         test(sddm.notice.indexOf("Sumi will be your login screen") === 0, "aviso de activación");
         test(p.rowReason({ id: "sddmActivate", kind: "action" }) === "Already your login screen", "Use ya no se ofrece");
     });
-    step("captura Overview en uso", () => { test(p.selectTab("Overview"), "Overview"); });
-    step("captura en uso", () => { if (sddm.previewStale) return false; w.shot("real-overview-in-use.png"); }, 30000);
+    step("captura en uso", () => { w.shot("real-page-in-use.png"); });
     step("Restore", () => { p.runAction("sddmDeactivate"); p.runAction("sddmDeactivate"); test(sddm.systemBusy === "deactivate", "restaurando"); });
     step("restaurado", () => {
         if (sddm.systemBusy !== "" || !idle() || !sddm.system || sddm.system.active) return false;
@@ -216,35 +165,28 @@ function cases(w, sddm, settings) {
     });
 
     // ── avatar (AccountsService falso) ──
-    step("pestaña Users and power", () => { test(p.selectTab("Users and power"), "pestaña"); });
-    step("fila del avatar", () => {
-        const row = p.rowItems["sddm:avatar"];
-        test(!!row && row.custom === false, "fila Avatar sin personalizar");
-        test(p.captionOf({ id: "sddm:avatar", key: "avatar" }).indexOf("your initials are shown") > 0, "pie sin avatar");
+    step("poner avatar", () => {
+        test(sddm.captionFor("avatar").indexOf("your initials are shown") > 0, "pie sin avatar");
         sddm.setAvatar(w.home + "/pic.png");
     });
     step("avatar puesto", () => {
         if (!idle() || !sddm.avatar || !sddm.avatar.exists) return false;
-        test(p.rowItems["sddm:avatar"].custom === true, "la fila se marca");
-        test(sddm.notice === "Avatar saved", "aviso: " + sddm.notice + " / " + sddm.error);
+        test(sddm.isSet("avatar") && sddm.notice === "Avatar saved", "aviso: " + sddm.notice + " / " + sddm.error);
     });
-    step("captura con avatar", () => { w.shot("real-users-avatar.png"); });
-    step("quitar avatar", () => { p.rowItems["sddm:avatar"].resetRequested(); });
-    step("avatar quitado", () => {
-        if (!idle() || !sddm.avatar || sddm.avatar.exists) return false;
-        test(p.rowItems["sddm:avatar"].custom === false, "fila sin marca");
-    });
+    step("quitar avatar", () => { sddm.unset("avatar"); });
+    step("avatar quitado", () => { if (!idle() || !sddm.avatar || sddm.avatar.exists) return false; });
 
-    // ── la ventana de prueba: sólo se arma (abrirla tomaría el teclado) ──
-    step("test window armado", () => {
-        p.runAction("sddmTry");
-        test(sddm.tryArmed, "Open pide confirmación");
-        test(p.captionOf({ id: "sddmTry" }).indexOf("takes the keyboard") > 0, "avisa del teclado");
+    // ── Open: la ventana, con origen en esta fila ──
+    step("Open", () => {
+        if (!p.screenName) p.screenName = "BENCH-1";      // review.qml no le da pantalla a Settings; la ventana la pide
+        p.runAction("sddmOpen");
+        test(!!ui && ui.open && !!ui.origin && ui.origin.path === "shell/sddm/sddmOpen", "Open abre la ventana con origen");
+        test(ui.close(false), "cerrarla");
     });
 
     step("cerrar la página", () => {
         test(p.openPath("shell/general"), "volver a General");
-        test(!sddm.watching && !sddm.tryArmed, "al salir se suelta el servicio y se desarma");
+        test(!sddm.watching, "al salir se suelta el servicio");
     });
     return steps;
 }

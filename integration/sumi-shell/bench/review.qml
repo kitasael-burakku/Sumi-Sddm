@@ -115,7 +115,7 @@ ShellRoot {
                         installOverlay.running = true;
                         return;
                     }
-                    win.steps = Checks.cases(win, Svc.SddmTheme, Svc.Settings);
+                    win.steps = Checks.cases(win, Svc.SddmTheme, Svc.Settings, Svc.LoginUi);
                     win.stepStart = Date.now();
                     runner.start();
                 } catch (e) { win.finish(String(e) + "\n" + e.stack); }

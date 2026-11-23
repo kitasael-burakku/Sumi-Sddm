@@ -5,7 +5,8 @@ import Quickshell
 import Quickshell.Io
 
 /**
- * Pantalla de inicio de sesión (Sumi SDDM, 2026-11-22): Settings → Desktop tools → Login screen.
+ * Pantalla de inicio de sesión (Sumi SDDM, 2026-11-22): Settings → Desktop tools → Login screen y, desde el
+ * 2026-11-23, su ventana propia (core/LoginLayer, services/LoginUi). Las dos son clientes de este servicio.
  *
  * La configuración es de Sumi SDDM, no de la shell (un dueño por dato): vive en ~/.config/sumi-sddm y NO entra en
  * settings.json, presets ni Export/Import. Aquí sólo se pide y se enseña; todo lo hace la orden `sumi-sddm` del
@@ -47,9 +48,25 @@ Singleton {
     property var fonts: []                   // [{family, system}]
     property string error: ""                // el último error para la persona («» si nada)
     property string notice: ""               // aviso informativo (p. ej. «cambiado en otro sitio»)
+    /** Errores por clave de la última escritura rechazada (`fields[]` de la CLI ≥ 0.6.1): clave → mensaje en inglés,
+     *  sin el nombre de la clave. Se borra el de una clave al volver a cambiarla o al guardarse. */
+    property var fieldErrors: ({})
     readonly property bool ready: root.status === "ready"
     readonly property bool busy: root._running !== null || root._queue.length > 0 || writeTimer.running
+    /** Hay escrituras sin terminar (lo pendiente, el agrupado o un `config set` en marcha); leer no cuenta. */
+    readonly property bool saving: Object.keys(root._pending).length > 0 || writeTimer.running
+                                   || (root._running !== null && root._running.kind === "set")
     readonly property int customCount: root.order.filter(k => root.values[k] && root.values[k].set).length
+    /** Claves personalizadas de un grupo del esquema (los puntos del rail de la ventana). */
+    function customIn(group) {
+        return root.order.filter(k => root.keys[k].group === group && root.values[k] && root.values[k].set).length;
+    }
+    /** El texto de un error de la CLI para la interfaz: `message` (inglés, desde 0.6.1) y, si falta, `error`. */
+    function _msg(doc, fallback) {
+        if (doc && doc.message) return String(doc.message);
+        if (doc && doc.error) return String(doc.error);
+        return fallback;
+    }
 
     // ---- sistema y avatar --------------------------------------------------------------------------------------
     /** `system status` (null mientras no se sabe): installed, active, activeTheme, inSync, version; missing si no
@@ -59,10 +76,17 @@ Singleton {
     property string systemBusy: ""
     /** `avatar info` (null si no se sabe): iconFile, exists, sddmUses… */
     property var avatar: null
+    /** `system log` (null mientras no se pide): greeters [{time, sumi, ok, problems}], sumiOk, logins…; o
+     *  {missing: true} si en este arranque no se ha mostrado ninguna pantalla de inicio. Sólo lo pide la página
+     *  System de la ventana (refreshLog). La CLI sale con 1 cuando hubo problemas, pero el JSON es el mismo. */
+    property var greeterLog: null
 
     // ---- quién mira ---------------------------------------------------------------------------------------------
     property var claims: ({})
     readonly property bool watching: Object.keys(root.claims).length > 0
+    /** La vista previa (un render de ~1,4 s) sólo la enseña la ventana Login screen: sin ella no se genera. */
+    readonly property bool previewing: !!root.claims["loginUi"]
+    onPreviewingChanged: root.schedulePreview()
     function claim(who, on) {
         if (!!on === !!root.claims[who]) return;
         const c = Object.assign({}, root.claims);
@@ -79,7 +103,7 @@ Singleton {
     property var _running: null
     function _enqueue(job) {
         // una carga, una vista previa o un estado ya en cola no se repite
-        if (["show", "preview", "system", "avatar"].indexOf(job.kind) >= 0 && root._queue.some(j => j.kind === job.kind))
+        if (["show", "preview", "system", "avatar", "log"].indexOf(job.kind) >= 0 && root._queue.some(j => j.kind === job.kind))
             return;
         root._queue = root._queue.concat([job]);
         root._pump();
@@ -125,7 +149,7 @@ Singleton {
             if (code === 127 && !doc) { root.status = "missing"; root.statusDetail = ""; return; }
             if (!doc || doc.ok !== true) {
                 root.status = "broken";
-                root.statusDetail = doc && doc.error ? doc.error : "sumi-sddm did not answer as expected";
+                root.statusDetail = root._msg(doc, "sumi-sddm did not answer as expected");
                 return;
             }
             if (doc.api !== root.api) {
@@ -140,7 +164,7 @@ Singleton {
     function _schemaDone(doc) {
         if (!doc || doc.ok !== true || !Array.isArray(doc.keys)) {
             root.status = "broken";
-            root.statusDetail = doc && doc.error ? doc.error : "Could not read the settings list";
+            root.statusDetail = root._msg(doc, "Could not read the settings list");
             return;
         }
         const k = {}, ord = [];
@@ -159,7 +183,7 @@ Singleton {
         root._enqueue({ kind: "show", args: ["config", "show"], done: (doc) => {
             if (!doc || doc.ok !== true) {
                 root.status = "broken";
-                root.statusDetail = doc && doc.error ? doc.error : "Could not read the settings";
+                root.statusDetail = root._msg(doc, "Could not read the settings");
                 return;
             }
             const v = doc.values || {};
@@ -179,12 +203,18 @@ Singleton {
         root._enqueue({ kind: "system", args: ["system", "status"], done: (doc) => {
             if (doc && doc.ok === true) root.system = doc;
             else root.system = { installed: false, missing: !!(doc && doc.code === "missing"),
-                                 error: doc && doc.error ? String(doc.error) : "" };
+                                 error: root._msg(doc, "") };
+        } });
+    }
+    function refreshLog() {
+        root._enqueue({ kind: "log", args: ["system", "log"], done: (doc) => {
+            if (doc && doc.ok === true) root.greeterLog = doc;
+            else root.greeterLog = { missing: !!(doc && doc.code === "missing"), error: root._msg(doc, "") };
         } });
     }
     function refreshAvatar() {
         root._enqueue({ kind: "avatar", args: ["avatar", "info"], done: (doc) => {
-            root.avatar = doc && doc.ok === true ? doc : { exists: false, error: doc && doc.error ? String(doc.error) : "" };
+            root.avatar = doc && doc.ok === true ? doc : { exists: false, error: root._msg(doc, "") };
         } });
     }
     function setAvatar(path) {
@@ -193,13 +223,13 @@ Singleton {
         root.error = ""; root.notice = "";
         root._enqueue({ kind: "avatarSet", args: ["avatar", "set", p], done: (doc) => {
             if (doc && doc.ok === true) { root.avatar = doc; root.notice = "Avatar saved"; root.schedulePreview(); }
-            else { root.error = doc && doc.error ? String(doc.error) : "The avatar could not be saved"; root.refreshAvatar(); }
+            else { root.error = root._msg(doc, "The avatar could not be saved"); root.refreshAvatar(); }
         } });
     }
     function clearAvatar() {
         if (!root.ready) return;
         root._enqueue({ kind: "avatarSet", args: ["avatar", "clear"], done: (doc) => {
-            if (!(doc && doc.ok === true)) root.error = doc && doc.error ? String(doc.error) : "The avatar could not be removed";
+            if (!(doc && doc.ok === true)) root.error = root._msg(doc, "The avatar could not be removed");
             root.refreshAvatar();
             root.schedulePreview();
         } });
@@ -262,7 +292,7 @@ Singleton {
             const first = (doc.problems || [])[0];
             root.error = "The theme failed its test with these settings · nothing changed" + (first ? " · " + String(first) : "");
         } else {
-            root.error = doc && doc.error ? String(doc.error) : "sumi-sddm could not change the login screen";
+            root.error = root._msg(doc, "sumi-sddm could not change the login screen");
         }
         root.refreshSystem();
     }
@@ -293,6 +323,11 @@ Singleton {
         const v = Object.assign({}, root.values);
         v[key] = Object.assign({}, v[key] || {}, { value: shown, set: !unset });
         root.values = v;
+        if (root.fieldErrors[key] !== undefined) {
+            const fe = Object.assign({}, root.fieldErrors);
+            delete fe[key];
+            root.fieldErrors = fe;
+        }
         root.error = "";
         root.notice = "";
         writeTimer.restart();
@@ -322,6 +357,9 @@ Singleton {
         if (doc && doc.ok === true) {
             root.writeCount++;
             root.stamp = String(doc.stamp || root.stamp);
+            const fe = Object.assign({}, root.fieldErrors);
+            for (const k in sent) delete fe[k];
+            root.fieldErrors = fe;
             root.reload();          // y, tras ella, `system status`: lo aplicado deja de coincidir
             return;
         }
@@ -329,9 +367,17 @@ Singleton {
         if (doc && doc.code === "conflict") {
             root._pending = ({});
             writeTimer.stop();
-            root.notice = "Changed outside Settings · reloaded";
+            root.notice = "Changed outside Sumi Shell · reloaded";
         } else {
-            root.error = doc && doc.error ? String(doc.error) : "sumi-sddm could not save the change";
+            root.error = root._msg(doc, "sumi-sddm could not save the change");
+            // `config set` es todo o nada: `fields` lista cada clave rechazada (y su mensaje, sin el nombre)
+            if (doc && Array.isArray(doc.fields) && doc.fields.length > 0) {
+                const fe = Object.assign({}, root.fieldErrors);
+                for (const f of doc.fields) if (f && f.key) fe[String(f.key)] = String(f.message || "");
+                root.fieldErrors = fe;
+                const n = doc.fields.length;
+                root.error = n === 1 ? root.error : n + " settings were not saved · see the fields";
+            }
         }
         root.reload();
     }
@@ -379,33 +425,169 @@ Singleton {
         { label: "Compact", value: "compact" }, { label: "Password", value: "expanded" },
         { label: "Sessions", value: "sessions" }, { label: "Error", value: "failed" }
     ]
+    /** Las 16 escenas de la CLI (`SCENARIOS` de tools/sumi-sddm), agrupadas para el menú «More» de la ventana. */
+    readonly property var allScenarios: [
+        { label: "Compact", value: "compact", section: "Notch" },
+        { label: "Password", value: "expanded", section: "Notch" },
+        { label: "Sessions", value: "sessions", section: "Notch" },
+        { label: "Error", value: "failed", section: "Notch" },
+        { label: "Typing", value: "typing", section: "Password" },
+        { label: "Caps Lock on", value: "caps", section: "Password" },
+        { label: "Signing in", value: "authenticating", section: "Password" },
+        { label: "Message", value: "info", section: "Password" },
+        { label: "Single user", value: "single", section: "Users" },
+        { label: "Many users", value: "many", section: "Users" },
+        { label: "Type a user name", value: "manual", section: "Users" },
+        { label: "Other user", value: "other", section: "Users" },
+        { label: "No password", value: "nopass", section: "Users" },
+        { label: "No sessions", value: "nosessions", section: "Sessions and power" },
+        { label: "Power confirm", value: "confirm", section: "Sessions and power" },
+        { label: "Second monitor", value: "secondary", section: "Screens" }
+    ]
+    function scenarioLabel(v) {
+        const s = root.allScenarios.find(x => x.value === v);
+        return s ? s.label : String(v);
+    }
+    /** La escena que mejor enseña un grupo (la ventana la sigue mientras no se elija una a mano). */
+    function sceneFor(group) {
+        switch (group) {
+        case "notch": return "expanded";
+        case "power": return "confirm";
+        case "users": return "many";
+        case "behaviour": return "failed";
+        default: return "compact";
+        }
+    }
     property string scenario: "expanded"
     onScenarioChanged: root.schedulePreview()
+    /** Tamaño de la vista previa, `AnchoxAlto` en píxeles físicos (la ventana pide el de su monitor). */
+    property string previewSize: "1280x720"
+    onPreviewSizeChanged: root.schedulePreview()
     property string previewUrl: ""
     property string previewStamp: ""
     property bool previewFailed: false
     property int _previewSerial: 0
     readonly property bool previewStale: root.previewStamp !== root.stamp || root._previewScenario !== root.scenario
+                                         || root._previewSize !== root.previewSize
     property string _previewScenario: ""
-    function schedulePreview() { if (root.watching && root.ready) previewTimer.restart(); }
+    property string _previewSize: ""
+    function schedulePreview() { if (root.previewing && root.ready) previewTimer.restart(); }
     Timer { id: previewTimer; interval: 600; onTriggered: root._preview() }
     function _preview() {
-        if (!root.watching || !root.ready) return;
+        if (!root.previewing || !root.ready) return;
         if (Object.keys(root._pending).length > 0 || writeTimer.running) { previewTimer.restart(); return; }
         const sc = root.scenario;
-        root._enqueue({ kind: "preview", args: ["preview", "--scenario", sc, "--size", "1280x720"], done: (doc) => {
+        const size = /^[1-9][0-9]{2,4}x[1-9][0-9]{2,4}$/.test(root.previewSize) ? root.previewSize : "1280x720";
+        root._enqueue({ kind: "preview", args: ["preview", "--scenario", sc, "--size", size], done: (doc) => {
             if (doc && doc.ok === true && doc.png) {
                 root._previewSerial++;
                 // otra URL en cada vista previa: la Image no reutiliza la anterior de su caché
                 root.previewUrl = "file://" + String(doc.png) + "?v=" + root._previewSerial;
                 root.previewStamp = String(doc.stamp || "");
                 root._previewScenario = sc;
+                root._previewSize = size;
                 root.previewFailed = false;
             } else {
                 root.previewFailed = true;
-                root.error = doc && doc.error ? String(doc.error) : "The preview could not be made";
+                root.error = root._msg(doc, "The preview could not be made");
             }
+            // lo pedido cambió mientras se hacía (otra escena u otro tamaño): otra vez
+            if (root.scenario !== sc || root.previewSize !== size) root.schedulePreview();
         } });
+    }
+
+    // ---- textos de las filas de estado y acciones (Settings y la ventana, 2026-11-23) -----------------------------
+    /** Valor a la derecha de las filas de estado: `sddmStatus` (la orden) y `sddmApplied` (el sistema). */
+    function infoText(id) {
+        if (id === "sddmStatus") {
+            switch (root.status) {
+            case "ready": return "Version " + root.version;
+            case "missing": return "Not installed";
+            case "incompatible": return "Incompatible version";
+            case "broken": return "Not working";
+            default: return "Checking…";
+            }
+        }
+        if (id === "sddmApplied") {
+            const sy = root.system;
+            if (!root.ready) return "";
+            if (!sy) return "Checking…";
+            if (sy.installed !== true) return "Not installed";
+            return sy.active ? "In use" : "Installed, not in use";
+        }
+        return "";
+    }
+    /** Pie de una fila de estado o de acción; "" si el id no es de éstas. */
+    function captionText(id) {
+        switch (id) {
+        case "sddmStatus":
+            if (root.status === "missing") return "Install it from the Sumi SDDM folder with: tools/sumi-sddm install --user";
+            if (root.status === "incompatible" || root.status === "broken") return root.statusDetail;
+            if (root.error.length > 0) return root.error;
+            if (root.notice.length > 0) return root.notice;
+            return root.saving ? "Saving…" : "Changes are saved for Sumi SDDM as you make them";
+        case "sddmApplied": {
+            const sy = root.system;
+            if (root.systemBusy !== "") return "Waiting for your password…";
+            if (!sy) return "";
+            if (sy.installed !== true)
+                return "Install the sumi-sddm package (packaging/arch in Sumi SDDM) to use it as your login screen";
+            if (!sy.inSync) return "Your latest changes aren't on the login screen yet · Apply them below";
+            return sy.active ? "Shows your current settings" : "Has your current settings · Use it to make it your login screen";
+        }
+        case "sddmApply": return "Copies your settings and wallpaper into the installed theme · asks for your password";
+        case "sddmActivate": return root.activateArmed ? "Press again · it will be used the next time the login screen appears"
+                                                       : "Makes Sumi your login screen · asks for your password, nothing restarts";
+        case "sddmDeactivate": return root.deactivateArmed ? "Press again to go back to the previous theme"
+                                                           : "Goes back to the theme you had before Sumi";
+        case "sddmTry": return root.tryArmed ? "Press again to open · it takes the keyboard until you close it"
+                                             : "The real login screen in a window, without logging in";
+        case "sddmReset": return root.resetArmed ? "Press again to reset " + root.customCount + " settings"
+                                                 : "Back to the theme's defaults · a copy is kept";
+        case "sddmRestore": return "Brings back the settings from before the last reset";
+        }
+        return "";
+    }
+    /** Por qué una acción no se puede usar ahora ("" si se puede). */
+    function reasonText(id) {
+        if (id === "sddmStatus" || id === "sddmApplied") return "";
+        if (!root.ready) return root.status === "checking" || root.status === "" ? "Checking…" : "Sumi SDDM is not available";
+        if (id === "sddmReset" && root.customCount === 0) return "Everything is at its default";
+        if (id === "sddmApply" || id === "sddmActivate" || id === "sddmDeactivate") {
+            const sy = root.system;
+            if (root.systemBusy !== "") return "Waiting for your password…";
+            if (!sy) return "Checking…";
+            if (sy.installed !== true) return "Sumi SDDM is not installed on the system";
+            if (id === "sddmApply" && sy.inSync) return "The login screen already has your settings";
+            if (id === "sddmActivate" && sy.active) return "Already your login screen";
+            if (id === "sddmDeactivate" && !sy.active) return "Sumi isn't your login screen";
+        }
+        return "";
+    }
+    /** Lanza la acción de una fila (los mismos ids que Settings). */
+    function runAction(id) {
+        if (id === "sddmTry") root.openTestWindow();
+        else if (id === "sddmReset") root.resetAll();
+        else if (id === "sddmRestore") root.restorePrevious();
+        else if (id === "sddmApply") root.systemApply();
+        else if (id === "sddmActivate") root.activateSystem();
+        else if (id === "sddmDeactivate") root.deactivateSystem();
+    }
+    /** El último arranque de la pantalla de inicio, en una línea: {state: ok|problems|missing|unknown, text, problems}. */
+    function logSummary() {
+        const g = root.greeterLog;
+        if (!g) return { state: "unknown", text: "Checking…", problems: [] };
+        if (g.missing) return { state: "missing", text: "No login screen has been shown since this computer started", problems: [] };
+        if (g.error) return { state: "unknown", text: String(g.error), problems: [] };
+        const ours = (g.greeters || []).filter(x => x.sumi);
+        if (ours.length === 0) return { state: "missing", text: "Sumi hasn't been the login screen since this computer started", problems: [] };
+        const last = ours[ours.length - 1];
+        const when = last.time ? Qt.formatDateTime(new Date(Number(last.time) * 1000), "HH:mm") : "";
+        const problems = (last.problems || []).map(String);
+        return problems.length === 0
+            ? { state: "ok", text: "Shown" + (when ? " at " + when : "") + " · no problems", problems: [] }
+            : { state: "problems", text: "Shown" + (when ? " at " + when : "") + " · " + problems.length
+                + (problems.length === 1 ? " problem" : " problems"), problems: problems };
     }
 
     // ---- filas para Settings ----------------------------------------------------------------------------------------
@@ -430,6 +612,8 @@ Singleton {
             if (!a.exists) return "Type the path of a picture · without one, your initials are shown";
             return a.sddmUses ? "Shown on the login screen · cropped to a circle" : "Saved, but the login screen can't read it";
         }
+        const fe = root.fieldErrors[key];
+        if (fe !== undefined) return fe.length > 0 ? fe : "This value was not saved";
         const w = root.warnings.find(x => x.key === key);
         if (w) return String(w.message);
         const e = root.keys[key];

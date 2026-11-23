@@ -1,5 +1,13 @@
 # Integración con Sumi Shell: Settings → Desktop tools → Login screen
 
+> **2026-11-23**: Sumi Shell tiene ahora una **ventana propia** Login screen (`core/LoginLayer`, `services/LoginUi`,
+> `surfaces/LoginScreen`, `components/SddmPreviewPane` y `SddmSystemPanel`, en el árbol de la shell; ADR-41 e informe
+> `docs/SUMI-LOGIN-UI-2026-11-23.md` del repo de Sumi Shell). Settings → Login screen quedó como resumen con «Open».
+> Aquí se mantienen al día `services/SddmTheme.qml` y `components/SddmField.qml` (iguales a la shell). `bench/` se rehízo
+> para la página resumen (filas, Open, Apply/Use/Restore y, por el servicio, los caminos de la CLI real); la ventana tiene
+> su propio banco en `tools/login-ui/` del repo de Sumi Shell. `edit.py` y `deliver.py` son registro de la entrega del
+> 2026-11-22.
+
 Lo que Sumi Shell necesita para configurar Sumi SDDM desde Settings. Se guarda aquí, versionado con el tema, pero
 **se ejecuta dentro de la shell**: la shell no importa nada de este repositorio. Sólo lanza la orden `sumi-sddm`
 del PATH (contrato JSON en [docs/CLI-JSON.md](../../docs/CLI-JSON.md)), y si no la encuentra la página lo explica.

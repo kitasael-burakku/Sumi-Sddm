@@ -137,6 +137,11 @@ def run(tree: Path, out: Path, scenario: str, cli: str | None, reload_from: Path
         elif scenario == "incompatible":
             (bindir / "sumi-sddm").write_text('#!/bin/sh\necho \'{"ok": true, "api": 2, "version": "9.0.0"}\'\n')
             (bindir / "sumi-sddm").chmod(0o755)
+        else:
+            # missing: /usr/bin/sumi-sddm (el paquete, desde 0.5.0) está en el PATH; un falso que responde como `env`
+            # cuando la orden no existe (2026-11-23)
+            (bindir / "sumi-sddm").write_text("#!/bin/sh\nexit 127\n")
+            (bindir / "sumi-sddm").chmod(0o755)
         env["PATH"] = f"{fake}:{bindir}:/usr/bin"
         logo = private / ".config/fastfetch/fastfetchlogo/minimaru.png"
         logo.parent.mkdir(parents=True)
