@@ -411,7 +411,7 @@ class EditorUiFakeTest(WindowCase):
         self.loaded()
         self.click(self.control("blur", "off"))
         self.idle()
-        self.assertEqual(self.item("message").property("text"), "another sumi-sddm operation is running")
+        self.assertEqual(self.item("message").property("text"), "Another sumi-sddm operation is running; try again")
         self.assertTrue(self.control("blur", "off").property("checked"), "vuelve a lo guardado")
 
     # ---- fase 3: vista previa, fuentes, avatar, fondo ---------------------------------------------------------------
@@ -707,6 +707,21 @@ class EditorUiFakeTest(WindowCase):
         self.assertTrue(wait(lambda: not self.win.isVisible(), 5))
         self.assertEqual(len(self.log("system", "apply")), 1)
         self.win = None
+
+    def test_rejected_value_shown_next_to_its_field(self):
+        self.state(None, reject={"dateFormat": "Some characters are not allowed here"})
+        self.loaded()
+        self.show("clock")
+        self.type_in(self.control("dateFormat", "text"), "d MMM")   # pasa el filtro de la ventana; la CLI no
+        self.idle()
+        cap = self.control("dateFormat", "caption")
+        self.assertEqual(cap.property("text"), "Some characters are not allowed here")
+        self.assertEqual(self.text("message"), "1 setting was not saved · see the field")
+        self.assertEqual(self.control("dateFormat", "text").property("text"), "dddd, d MMMM", "lo guardado")
+        self.state(None, reject={})
+        self.type_in(self.control("dateFormat", "text"), "d MMMM")
+        self.idle()
+        self.assertEqual(cap.property("text"), "")
 
     def test_close_writes_pending_changes_first(self):
         self.loaded(write_delay_ms=5000)

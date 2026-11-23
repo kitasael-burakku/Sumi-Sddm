@@ -63,7 +63,7 @@ from sumiconf import ConfigError, Schema, strict  # noqa: E402
 from sumiconf import gen as gen_mod  # noqa: E402
 from sumiconf import image, ini, paths, probe, state  # noqa: E402
 from sumiconf import install as install_mod  # noqa: E402
-from sumiconf.schema import to_ini  # noqa: E402
+from sumiconf.schema import GENERIC_EN, to_ini  # noqa: E402
 
 ROOT = paths.ROOT
 THEME = paths.THEME
@@ -92,17 +92,26 @@ def emit(obj, as_json: bool, text: str = "") -> None:
         print(text)
 
 
-def fail(msg: str, as_json: bool = False, rc: int = 1, code: str = "invalid", **extra) -> int:
-    """Error. En JSON: {ok: false, api, code, error, …}; `code` es estable, `error` es texto para personas."""
+def fail(msg: str, as_json: bool = False, rc: int = 1, code: str = "invalid", *, en: str | None = None,
+         fields: list[dict] | None = None, **extra) -> int:
+    """Error. En JSON: {ok: false, api, code, error, message, fields?, …}.
+
+    `code` es estable; `error` es texto para personas en la terminal (español); `message`, el mismo en inglés para
+    interfaces (si no se da, el genérico de su código); `fields`, [{key, message}] con los errores de cada clave.
+    """
     if as_json:
-        print(json.dumps({"ok": False, "api": state.API, "code": code, "error": msg, **extra}, ensure_ascii=False))
+        doc = {"ok": False, "api": state.API, "code": code, "error": msg,
+               "message": en or GENERIC_EN.get(code, GENERIC_EN["invalid"]), **extra}
+        if fields:
+            doc["fields"] = fields
+        print(json.dumps(doc, ensure_ascii=False))
     else:
         print(f"sumi-sddm: {msg}", file=sys.stderr)
     return rc
 
 
 def fail_exc(exc: ConfigError, as_json: bool) -> int:
-    return fail(str(exc), as_json, code=exc.code, **exc.extra)
+    return fail(str(exc), as_json, code=exc.code, en=exc.english(), fields=exc.fields, **exc.extra)
 
 
 def qt_tool(name: str) -> str:
@@ -279,7 +288,8 @@ def config_write(schema: Schema, args) -> str:
         return "configuración restablecida (copia en theme.conf.user.prev)"
     if op == "restore":
         if not prev.exists():
-            raise ConfigError("no hay copia anterior (theme.conf.user.prev)", code="missing")
+            raise ConfigError("no hay copia anterior (theme.conf.user.prev)", code="missing",
+                          en="There is no earlier copy to restore (it is made by “Reset all”)")
         save_user(schema, load_user(schema, prev))
         return "copia anterior restaurada"
     user = load_user(schema)
@@ -294,7 +304,7 @@ def config_write(schema: Schema, args) -> str:
             k, sep, v = item.partition("=")
             k = k.strip()
             if not sep:
-                errors.append(f"«{item}»: se esperaba CLAVE=VALOR")
+                errors.append(ConfigError(f"«{item}»: se esperaba CLAVE=VALOR", en=f"“{item}”: expected KEY=VALUE"))
                 continue
             try:
                 e = schema.entry(k)
@@ -305,9 +315,11 @@ def config_write(schema: Schema, args) -> str:
                 if k == "background":
                     check_background(schema, new[k])
             except ConfigError as exc:
-                errors.append(str(exc))
+                if exc.key is None and k in schema.keys:   # p. ej. la imagen de `background` no vale
+                    exc = ConfigError(str(exc), exc.code, key=k, en=exc.en or exc.english(), **exc.extra)
+                errors.append(exc)
         if errors:
-            raise ConfigError("; ".join(errors))
+            raise ConfigError.combine(errors)
     if new != user:
         save_user(schema, new)
     return f"guardado en {conf}"
@@ -563,7 +575,8 @@ def my_avatar() -> str:
 def cmd_preview(args) -> int:
     j = args.json
     if not re.fullmatch(r"[1-9][0-9]{2,4}x[1-9][0-9]{2,4}", args.size):
-        return fail(f"tamaño inválido: {args.size} (AnchoxAlto)", j, 2, code="usage")
+        return fail(f"tamaño inválido: {args.size} (AnchoxAlto)", j, 2, code="usage",
+                    en=f"Invalid size: {args.size} (use WIDTHxHEIGHT)")
     try:
         schema = Schema.load()
         # Una vista previa a la vez (la copia preparada es compartida); la config se lee como una foto coherente.
@@ -587,7 +600,8 @@ def cmd_preview(args) -> int:
     except ConfigError as exc:
         return fail_exc(exc, j)
     if not ok:
-        return fail("no se pudo generar la vista previa: " + " | ".join(noise[-5:]), j, code="render")
+        return fail("no se pudo generar la vista previa: " + " | ".join(noise[-5:]), j, code="render",
+                    en="The preview could not be made: " + " | ".join(noise[-5:]))
     emit({"png": str(out), "scenario": args.scenario, "size": args.size, "stamp": stamp, "backend": backend}, j,
          str(out))
     return 0
@@ -607,7 +621,7 @@ def cmd_try(args) -> int:
             return subprocess.run([GREETER, "--test-mode", "--theme", str(target)]).returncode
     except ConfigError as exc:
         if exc.code == "busy":
-            return fail("ya hay una ventana de prueba abierta", code="busy")
+            return fail("ya hay una ventana de prueba abierta", code="busy", en="A test window is already open")
         return fail_exc(exc, False)
 
 
@@ -626,7 +640,8 @@ def crop_avatar(src_fd: int, out: Path, size: int) -> None:
                             f"--out={out}", f"--size={size}"], env=offscreen_env("software"),
                            capture_output=True, text=True, timeout=60)
         if p.returncode != 0 or not out.is_file():
-            raise ConfigError("no se pudo recortar la imagen: " + (p.stdout + p.stderr).strip()[-300:], code="io")
+            raise ConfigError("no se pudo recortar la imagen: " + (p.stdout + p.stderr).strip()[-300:], code="io",
+                              en="The picture could not be cropped: " + (p.stdout + p.stderr).strip()[-300:])
     finally:
         work.unlink(missing_ok=True)
 
@@ -654,14 +669,16 @@ def cmd_avatar(args) -> int:
                 if out.stat().st_size <= avatar.MAX_ICON_BYTES:
                     break
             else:
-                raise ConfigError("la imagen recortada sigue siendo demasiado grande para AccountsService")
+                raise ConfigError("la imagen recortada sigue siendo demasiado grande para AccountsService",
+                          en="The cropped picture is still too big for AccountsService")
         finally:
             os.close(fd)
         os.chmod(out, 0o644)
         avatar.set_icon(obj, str(out))
         st = avatar.status()
         if not st["exists"]:
-            raise ConfigError("AccountsService aceptó la orden pero no guardó el avatar", code="io")
+            raise ConfigError("AccountsService aceptó la orden pero no guardó el avatar", code="io",
+                          en="AccountsService accepted the picture but didn't save it")
         emit({**st, "source": {"kind": info.kind, "width": info.width, "height": info.height}, "size": size}, j,
              f"avatar guardado en {st['iconFile']} ({size}×{size})"
              + (" · la pantalla de inicio lo verá" if st["sddmUses"] else ""))
@@ -671,6 +688,16 @@ def cmd_avatar(args) -> int:
 
 
 # ── Sistema: el helper con pkexec (Fase 5) ───────────────────────────────────────────────────────────────
+#: Errores del helper en inglés, por código (el helper corre como root y responde en español; no se toca).
+HELPER_EN = {
+    "probe": "The theme failed its test with these settings; nothing changed",
+    "missing": "Something the login screen change needs is missing (is the sumi-sddm package installed?)",
+    "busy": "Another login screen change is running; try again",
+    "invalid": "The system helper rejected these settings; nothing changed",
+    "io": "The login screen could not be changed; check it with “sumi-sddm system status”",
+    "conflict": "The login screen configuration changed meanwhile; nothing was changed",
+    "unsupported": "This change is not supported on this system",
+}
 HELPER = "/usr/lib/sumi-sddm/sumi-sddm-helper"
 PKEXEC = "/usr/bin/pkexec"
 
@@ -734,7 +761,8 @@ def cmd_system_log(args) -> int:
         expect = None
     entries = greeterlog.read_journal(args.boot)
     if not entries:
-        return fail(f"el journal no tiene registros del greeter en el arranque {args.boot}", j, code="missing")
+        return fail(f"el journal no tiene registros del greeter en el arranque {args.boot}", j, code="missing",
+                    en="No login screen has been recorded in this boot's journal")
     s = greeterlog.summarize(entries, expect)
     s["boot"] = args.boot
     lines = []
@@ -761,13 +789,14 @@ def cmd_system(args) -> int:
     helper, pkexec = helper_paths()
     if not os.path.exists(helper):
         return fail("Sumi SDDM no está instalado en el sistema (paquete sumi-sddm; ver packaging/arch)", j,
-                    code="missing")
+                    code="missing", en="Sumi SDDM is not installed system-wide (sumi-sddm package)")
     try:
         schema = Schema.load()
         if args.op == "status":
             doc, rc, err = run_helper([helper, "status", "--json"], timeout=60)
             if not doc or doc.get("ok") is not True:
-                return fail((doc or {}).get("error") or err or "el helper no respondió", j, code="io")
+                return fail((doc or {}).get("error") or err or "el helper no respondió", j, code="io",
+                            en="The system helper did not answer")
             _, expected, stamp = system_package(schema)
             doc.pop("ok", None), doc.pop("api", None)
             doc["inSync"] = doc.get("installed") is True and doc.get("applied") == expected
@@ -789,11 +818,16 @@ def cmd_system(args) -> int:
     doc, rc, err = run_helper(argv, data)
     if doc is None:
         if rc in (126, 127):
-            return fail("autenticación cancelada o denegada; no se ha cambiado nada", j, code="denied")
-        return fail(err or f"el helper terminó con código {rc} sin respuesta", j, code="io")
+            return fail("autenticación cancelada o denegada; no se ha cambiado nada", j, code="denied",
+                        en="Authentication cancelled or denied; nothing changed")
+        return fail(err or f"el helper terminó con código {rc} sin respuesta", j, code="io",
+                    en=f"The system helper ended (code {rc}) without an answer; nothing was confirmed")
     if doc.get("ok") is not True:
         extra = {k: v for k, v in doc.items() if k not in ("ok", "api", "code", "error")}
-        return fail(str(doc.get("error", "error del helper")), j, code=str(doc.get("code", "io")), **extra)
+        code = str(doc.get("code", "io"))
+        # El helper (root) responde en español; aquí, el inglés por código. Los detalles (problems…) van aparte.
+        return fail(str(doc.get("error", "error del helper")), j, code=code,
+                    en=HELPER_EN.get(code, "The login screen could not be changed; check it with “sumi-sddm system status”"), **extra)
     doc.pop("ok", None), doc.pop("api", None)
     if sent_stamp:
         doc["stamp"] = sent_stamp
@@ -1132,7 +1166,8 @@ def main() -> int:
         return fail_exc(exc, j)
     except OSError as exc:
         where = f"{exc.filename}: " if exc.filename else ""
-        return fail(f"{where}{exc.strerror or exc}", j, code="io")
+        return fail(f"{where}{exc.strerror or exc}", j, code="io",
+                    en=f"A file could not be read or written: {where}{exc.strerror or exc}")
 
 
 if __name__ == "__main__":

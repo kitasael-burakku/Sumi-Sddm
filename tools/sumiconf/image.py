@@ -52,7 +52,7 @@ def _webp(head: bytes):
         w = int.from_bytes(head[24:27], "little") + 1
         h = int.from_bytes(head[27:30], "little") + 1
         return "webp", w, h
-    raise ConfigError("WebP con una cabecera que no se reconoce")
+    raise ConfigError("WebP con una cabecera que no se reconoce", en="This WebP file has a header that isn't recognised")
 
 
 SOF = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
@@ -91,7 +91,7 @@ def _jpeg(f) -> tuple | None:
         if nxt != b"\xff":
             break
         f.seek(-1, os.SEEK_CUR)
-    raise ConfigError("JPEG sin cabecera de dimensiones legible")
+    raise ConfigError("JPEG sin cabecera de dimensiones legible", en="This JPEG has no readable size header")
 
 
 def webp_supported() -> bool:
@@ -104,31 +104,31 @@ def open_regular(path: Path) -> int:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     except OSError as exc:
         if exc.errno == 40:  # ELOOP
-            raise ConfigError(f"{path}: es un enlace simbólico; indica el archivo real") from exc
-        raise ConfigError(f"{path}: no se puede abrir ({exc.strerror})") from exc
+            raise ConfigError(f"{path}: es un enlace simbólico; indica el archivo real", en=f"{path} is a symbolic link; choose the real file") from exc
+        raise ConfigError(f"{path}: no se puede abrir ({exc.strerror})", en=f"{path} can't be opened ({exc.strerror})") from exc
     st = os.fstat(fd)
     if not stat.S_ISREG(st.st_mode):
         os.close(fd)
-        raise ConfigError(f"{path}: no es un archivo regular")
+        raise ConfigError(f"{path}: no es un archivo regular", en=f"{path} is not a regular file")
     return fd
 
 
 def inspect_fd(fd: int, min_side: int = MIN_SIDE) -> ImageInfo:
     st = os.fstat(fd)
     if st.st_size > MAX_BYTES:
-        raise ConfigError(f"imagen demasiado grande ({st.st_size // (1024 * 1024)} MiB; máximo {MAX_BYTES // (1024 * 1024)})")
+        raise ConfigError(f"imagen demasiado grande ({st.st_size // (1024 * 1024)} MiB; máximo {MAX_BYTES // (1024 * 1024)})", en=f"The image is too big ({st.st_size // (1024 * 1024)} MiB; at most {MAX_BYTES // (1024 * 1024)} MiB)")
     if st.st_size < 32:
-        raise ConfigError("archivo demasiado pequeño para ser una imagen")
+        raise ConfigError("archivo demasiado pequeño para ser una imagen", en="The file is too small to be an image")
     with os.fdopen(os.dup(fd), "rb") as f:
         head = f.read(64)
         got = _png(head) or _webp(head) or _jpeg(f)
     if not got:
-        raise ConfigError("formato no admitido (se aceptan JPEG, PNG y WebP)")
+        raise ConfigError("formato no admitido (se aceptan JPEG, PNG y WebP)", en="Format not supported (use JPEG, PNG or WebP)")
     kind, w, h = got
     if kind == "webp" and not webp_supported():
-        raise ConfigError("WebP necesita qt6-imageformats, que no está instalado")
+        raise ConfigError("WebP necesita qt6-imageformats, que no está instalado", en="WebP needs qt6-imageformats, which isn't installed")
     if min(w, h) < min_side or max(w, h) > MAX_SIDE or w * h > MAX_PIXELS:
-        raise ConfigError(f"dimensiones no admitidas ({w}×{h}; lado mínimo {min_side}, máximo {MAX_SIDE})")
+        raise ConfigError(f"dimensiones no admitidas ({w}×{h}; lado mínimo {min_side}, máximo {MAX_SIDE})", en=f"Size not supported ({w}×{h}; each side between {min_side} and {MAX_SIDE} pixels)")
     return ImageInfo(kind, w, h, st.st_size)
 
 
@@ -148,7 +148,7 @@ def copy_validated(src: Path, dest_dir: Path, stem: str) -> tuple[Path, ImageInf
         dest_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
         dest = dest_dir / f"{stem}.{info.kind}"
         if dest.is_symlink():
-            raise ConfigError(f"{dest}: es un enlace simbólico")
+            raise ConfigError(f"{dest}: es un enlace simbólico", en=f"{dest} is a symbolic link")
         tmp = dest_dir / f".{stem}.{os.getpid()}.tmp"
         with os.fdopen(os.dup(fd), "rb") as fin, open(tmp, "xb") as fout:
             fin.seek(0)

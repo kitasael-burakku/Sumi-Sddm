@@ -84,11 +84,11 @@ def locked_file(lock: Path, exclusive: bool = True, timeout: float = 5.0):
         fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     except OSError as exc:
         if exc.errno == errno.ELOOP:
-            raise ConfigError(f"{lock}: es un enlace simbólico", code="io") from exc
+            raise ConfigError(f"{lock}: es un enlace simbólico", en=f"{lock} is a symbolic link", code="io") from exc
         raise
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise ConfigError(f"{lock}: no es un archivo regular", code="io")
+            raise ConfigError(f"{lock}: no es un archivo regular", en=f"{lock} is not a regular file", code="io")
         op = (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB
         deadline = time.monotonic() + timeout
         while True:
@@ -97,7 +97,7 @@ def locked_file(lock: Path, exclusive: bool = True, timeout: float = 5.0):
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise ConfigError("otra operación de sumi-sddm está en curso; inténtalo de nuevo",
+                    raise ConfigError("otra operación de sumi-sddm está en curso; inténtalo de nuevo", en="Another sumi-sddm operation is running; try again",
                                       code="busy") from None
                 time.sleep(0.05)
         yield
@@ -121,7 +121,7 @@ def check_expect(expect: str | None) -> None:
         return
     current = stamp()
     if expect != current:
-        raise ConfigError("la configuración cambió desde que se leyó; vuelve a cargarla", code="conflict",
+        raise ConfigError("la configuración cambió desde que se leyó; vuelve a cargarla", en="The settings changed since they were read; reload them", code="conflict",
                           stamp=current)
 
 
@@ -130,10 +130,10 @@ def fonts(pattern, max_len: int = 64) -> list[dict]:
     """[{family, system}] ordenado. `system`: fuera de tu $HOME, así que también la verá el usuario sddm."""
     fc = shutil.which("fc-list")
     if not fc:
-        raise ConfigError("fc-list (fontconfig) no está disponible", code="missing")
+        raise ConfigError("fc-list (fontconfig) no está disponible", en="fc-list (fontconfig) isn't available", code="missing")
     p = subprocess.run([fc, "--format", "%{family}\t%{file}\n"], capture_output=True, text=True, timeout=30)
     if p.returncode != 0:
-        raise ConfigError("fc-list falló", code="io")
+        raise ConfigError("fc-list falló", en="fc-list failed", code="io")
     home = str(Path.home()).rstrip("/") + "/"
     fams: dict[str, bool] = {}
     for line in p.stdout.splitlines():

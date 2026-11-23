@@ -23,6 +23,19 @@ MAGICK = shutil.which("magick")
 STAMP_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
+SPANISH_RE = re.compile(r"[áéíóúñ¿¡«»]|\b(no se|fuera de|se esperaba|clave|archivo|línea)\b", re.I)
+
+
+def assert_english(t: unittest.TestCase, doc: dict) -> None:
+    """Todo error JSON lleva `message` en inglés (para interfaces); `fields`, si está, también."""
+    t.assertIsInstance(doc.get("message"), str, doc)
+    t.assertTrue(doc["message"].strip(), doc)
+    t.assertNotRegex(doc["message"], SPANISH_RE, doc)
+    for f in doc.get("fields", []):
+        t.assertEqual(set(f), {"key", "message"}, doc)
+        t.assertNotRegex(f["message"], SPANISH_RE, doc)
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -54,6 +67,7 @@ class Base(unittest.TestCase):
         doc = json.loads(p.stdout)
         self.assertEqual((doc["ok"], doc["api"], doc["code"]), (False, 1, code), doc)
         self.assertIsInstance(doc["error"], str)
+        assert_english(self, doc)
         return doc
 
     def stamp(self):
@@ -88,6 +102,77 @@ class EnvelopeTest(Base):
         self.cfg.mkdir(parents=True, exist_ok=True)   # una escritura fallida ya creó el directorio (.lock)
         self.conf.write_text("[General]\nnotchRadius=banana\n")
         self.err("invalid", "config", "show")
+
+    def test_validation_errors_per_field(self):
+        d = self.err("invalid", "config", "set", "dateFormat=%%", "accentColor=red", "notchRadius=99",
+                     "notchIdleCollapse=2", "clockFormat=12h")
+        self.assertEqual(d["fields"], [
+            {"key": "dateFormat", "message": "Some characters are not allowed here"},
+            {"key": "accentColor", "message": "Expected a colour like #rrggbb or #aarrggbb"},
+            {"key": "notchRadius", "message": "Use a value between 4 and 48"},
+            {"key": "notchIdleCollapse", "message": "Use a value between 5 and 600, or 0 to turn it off"},
+        ])
+        self.assertTrue(d["message"].startswith("dateFormat: Some characters"), d)
+        self.assertIn("fuera de rango (4–48)", d["error"], "la terminal sigue en español")
+        self.assertFalse(self.conf.exists(), "todo o nada: la clave válida tampoco se escribe")
+        p = self.run_cli("config", "set", "accentColor=red", rc=1)
+        self.assertIn("se esperaba un color", p.stderr)
+
+    def test_every_type_explains_itself_in_english(self):
+        cases = {"dimOpacity=x": "Expected a number", "dimOpacity=2": "Use a value between 0 and 0.85",
+                 "avatarSize=4.5": "Expected a whole number", "userNames=maybe": "Expected true or false",
+                 "clockFormat=36h": "Allowed values: 24h, 12h", "fontFamily=" + "a" * 80: "Too long (at most 64 characters)",
+                 "background=/etc/x.png": "Choose the image with “wallpaper set”, or use an image under /usr/share",
+                 "background=../x.png": "This path is not allowed", "accentColor=@x": "A value can't start with “@”"}
+        for pair, msg in cases.items():
+            d = self.err("invalid", "config", "set", pair)
+            self.assertEqual(d["fields"], [{"key": pair.split("=")[0], "message": msg}], pair)
+
+    def test_unknown_key_and_malformed_pair(self):
+        d = self.err("invalid", "config", "set", "accentColr=#ffffff")
+        self.assertEqual(d["fields"], [{"key": "accentColr", "message": "Unknown setting; did you mean “accentColor”?"}])
+        d = self.err("invalid", "config", "set", "nope")
+        self.assertEqual(d["message"], "“nope”: expected KEY=VALUE")
+        self.assertNotIn("fields", d)
+
+    def test_non_field_errors_in_english(self):
+        self.assertEqual(self.err("missing", "config", "restore")["message"],
+                         "There is no earlier copy to restore (it is made by “Reset all”)")
+        bad = self.home / "bad.png"
+        bad.write_text("x")
+        self.assertEqual(self.err("invalid", "wallpaper", "set", str(bad))["message"],
+                         "The file is too small to be an image")
+        p = self.run_cli("preview", "--size", "9x9", "--json", rc=2)
+        assert_english(self, json.loads(p.stdout))
+        self.cfg.mkdir(parents=True, exist_ok=True)
+        self.conf.write_text("[General]\naccentColor=#fff\naccentColor=#000\n")
+        d = self.err("invalid", "config", "show")
+        self.assertEqual(d["message"], "Your settings file, line 3: “accentColor” appears twice")
+
+    def test_errors_an_interface_can_meet_carry_english(self):
+        """Cada ConfigError/fail que puede llegar a una interfaz trae su `en=`: no se olvida en errores nuevos.
+
+        Fuera quedan sólo lo de terminal o desarrollo (editar con $EDITOR, install --user, smoke, el esquema mal
+        escrito, órdenes de desarrollo) y los errores de uso (code="usage"); esos reciben el texto genérico.
+        """
+        import ast
+        terminal_only = {("sumi-sddm", "find_editor"), ("sumi-sddm", "config_edit"), ("sumi-sddm", "cmd_smoke"),
+                         ("sumi-sddm", "main"), ("schema.py", "check_entry"), ("schema.py", "load")}
+        files = [CLI] + [f for f in (ROOT / "tools" / "sumiconf").glob("*.py") if f.name != "install.py"]
+        missing = []
+        for f in files:
+            for fn in ast.walk(ast.parse(f.read_text())):
+                if not isinstance(fn, ast.FunctionDef) or (f.name, fn.name) in terminal_only:
+                    continue
+                for n in ast.walk(fn):
+                    if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                            and n.func.id in ("ConfigError", "fail")):
+                        continue
+                    kw = {k.arg: k.value for k in n.keywords}
+                    usage = isinstance(kw.get("code"), ast.Constant) and kw["code"].value == "usage"
+                    if "en" not in kw and None not in kw and not usage:
+                        missing.append(f"{f.name}:{n.lineno} ({fn.name})")
+        self.assertEqual(missing, [])
 
     def test_usage_errors_are_rc2_without_json(self):
         p = self.run_cli("config", "set", "notchRadius=3", "--expect", "nothex", "--json", rc=2)

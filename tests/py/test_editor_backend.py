@@ -244,8 +244,33 @@ class EditorBackendTest(unittest.TestCase):
         b = self.loaded()
         b.set("dim", 0.3)
         self.idle(b)
-        self.assertEqual(b.error, "another sumi-sddm operation is running")
+        self.assertEqual(b.error, "Another sumi-sddm operation is running; try again")
         self.assertEqual(b.values["dim"]["value"], 0.4)
+
+    def test_rejected_fields(self):
+        self.state(None, reject={"accentColor": "Expected a colour like #rrggbb or #aarrggbb",
+                                 "dim": "Use a value between 0 and 1"})
+        b = self.loaded()
+        b.set("accentColor", "nope")
+        b.set("dim", 7)
+        b.set("showClock", False)
+        self.idle(b)
+        self.assertEqual(b.fieldErrors, {"accentColor": "Expected a colour like #rrggbb or #aarrggbb",
+                                         "dim": "Use a value between 0 and 1"})
+        self.assertEqual(b.error, "2 settings were not saved · see the fields")
+        self.assertEqual(b.values["accentColor"]["value"], "#a9bdff", "vuelve a lo guardado")
+        b.set("dim", 0.5)                                # corregir una quita su aviso al momento
+        self.assertEqual(list(b.fieldErrors), ["accentColor"])
+        self.state(None, reject={})
+        self.idle(b)
+        self.assertEqual(b.fieldErrors, {}, "una escritura aceptada borra los avisos")
+
+    def test_old_cli_errors_still_shown(self):
+        self.state(None, busy_next=1, old_cli=True)      # sin `message`: se enseña `error`
+        b = self.loaded()
+        b.set("dim", 0.3)
+        self.idle(b)
+        self.assertEqual(b.error, "otra operación de sumi-sddm está en curso")
 
     def test_arguments_reach_the_cli_intact(self):
         b = self.loaded()

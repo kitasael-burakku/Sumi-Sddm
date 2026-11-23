@@ -26,7 +26,7 @@ MAX_ICON_BYTES = 1024 * 1024          # el límite de AccountsService para un us
 def busctl() -> str:
     found = os.environ.get("SUMI_SDDM_BUSCTL_TEST") or shutil.which("busctl")
     if not found:
-        raise ConfigError("busctl (systemd) no está disponible", code="missing")
+        raise ConfigError("busctl (systemd) no está disponible", en="busctl (systemd) isn't available", code="missing")
     return found
 
 
@@ -36,12 +36,12 @@ def _call(*args: str, timeout: int = 30):
     if p.returncode != 0:
         msg = (p.stderr.strip() or p.stdout.strip() or "error de D-Bus").splitlines()[-1]
         if "org.freedesktop.Accounts" in msg and ("not" in msg.lower() or "activat" in msg.lower()):
-            raise ConfigError("AccountsService no está disponible: " + msg, code="missing")
-        raise ConfigError("AccountsService: " + msg, code="io")
+            raise ConfigError("AccountsService no está disponible: " + msg, en="AccountsService isn't available: " + msg, code="missing")
+        raise ConfigError("AccountsService: " + msg, en="AccountsService: " + msg, code="io")
     try:
         return json.loads(p.stdout) if p.stdout.strip() else None
     except ValueError:
-        raise ConfigError("respuesta de AccountsService no esperada", code="io") from None
+        raise ConfigError("respuesta de AccountsService no esperada", en="Unexpected reply from AccountsService", code="io") from None
 
 
 def user_object(user: str | None = None) -> str:
@@ -50,7 +50,7 @@ def user_object(user: str | None = None) -> str:
     try:
         return str(doc["data"][0])
     except (TypeError, KeyError, IndexError):
-        raise ConfigError("AccountsService no conoce a este usuario", code="io") from None
+        raise ConfigError("AccountsService no conoce a este usuario", en="AccountsService doesn't know this user", code="io") from None
 
 
 def icon_file(obj: str) -> str:

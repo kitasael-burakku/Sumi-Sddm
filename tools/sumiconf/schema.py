@@ -31,13 +31,50 @@ SYSTEM_PATH_RE = re.compile(r"^/usr/share/[A-Za-z0-9._/-]+\.([A-Za-z]+)$")
 DEFAULT_SCHEMA = Path(__file__).resolve().parents[2] / "schema" / "config-schema.json"
 
 
-class ConfigError(ValueError):
-    """Error para el usuario. `code` clasifica la causa en las respuestas --json (docs/CLI-JSON.md)."""
+#: Texto en inglés por código, para los errores que no traen el suyo (las interfaces están en inglés).
+GENERIC_EN = {
+    "invalid": "The value is not valid",
+    "io": "A file could not be read or written",
+    "busy": "Another sumi-sddm operation is running; try again",
+    "conflict": "The settings changed since they were read; reload them",
+    "missing": "Something sumi-sddm needs is not available",
+    "unsupported": "This is not available in this installation",
+    "usage": "The command was not understood",
+    "denied": "Authentication cancelled or denied; nothing changed",
+    "probe": "The theme failed its test with these settings; nothing changed",
+    "render": "The preview could not be made",
+}
 
-    def __init__(self, message: str, code: str = "invalid", **extra):
+
+class ConfigError(ValueError):
+    """Error para el usuario. `code` clasifica la causa en las respuestas --json (docs/CLI-JSON.md).
+
+    El mensaje es para la terminal (español). `en` es el mismo en inglés, para interfaces (`message` en JSON);
+    con `key`, es un error de esa clave y `en` va sin el nombre, para enseñarlo junto al campo (`fields`).
+    """
+
+    def __init__(self, message: str, code: str = "invalid", *, en: str | None = None, key: str | None = None,
+                 fields: list[dict] | None = None, **extra):
         super().__init__(message)
         self.code = code
+        self.en = en
+        self.key = key
+        self.fields = fields if fields is not None else ([{"key": key, "message": en}] if key and en else [])
         self.extra = extra
+
+    def english(self) -> str:
+        """Una línea en inglés para una interfaz: la propia o, si no hay, la genérica de su código."""
+        if self.en and self.key:
+            return f"{self.key}: {self.en}"
+        return self.en or GENERIC_EN.get(self.code, GENERIC_EN["invalid"])
+
+    @classmethod
+    def combine(cls, errors: list["ConfigError"]) -> "ConfigError":
+        """Varios errores de validación en uno (todo o nada): los mensajes juntos y todas sus claves."""
+        if len(errors) == 1:
+            return errors[0]
+        return cls("; ".join(map(str, errors)), errors[0].code, en="; ".join(e.english() for e in errors),
+                   fields=[f for e in errors for f in e.fields])
 
 
 @dataclass
@@ -64,7 +101,8 @@ class Schema:
         if key not in self.keys:
             hint = self.suggest(key)
             tail = f" (¿quisiste decir «{hint}»?)" if hint else " (lista completa: sumi-sddm config schema)"
-            raise ConfigError(f"clave desconocida: {key}{tail}")
+            raise ConfigError(f"clave desconocida: {key}{tail}", key=key,
+                              en="Unknown setting" + (f"; did you mean “{hint}”?" if hint else ""))
         return self.keys[key]
 
     def suggest(self, key: str) -> str:
@@ -162,32 +200,44 @@ def _lenient_path(e: dict, v: str) -> str:
 
 
 # ── Estricta (CLI y helper) ──────────────────────────────────────────────────────────────
+def _g(n) -> str:
+    """Un número del esquema para un mensaje (0.85, no 0.85000001; 600, no 600.0)."""
+    return f"{n:g}"
+
+
 def strict(e: dict, raw: str):
-    """Valida y normaliza; lanza ConfigError con un mensaje para el usuario."""
+    """Valida y normaliza; lanza ConfigError con un mensaje para el usuario (y su versión en inglés)."""
     k, t = e["key"], e["type"]
+
+    def bad(es: str, en: str) -> ConfigError:
+        return ConfigError(f"{k}: {es}", key=k, en=en)
+
     if raw is None:
-        raise ConfigError(f"{k}: falta el valor")
+        raise bad("falta el valor", "A value is needed")
     v = raw.strip(JS_WS)
     if CONTROL_RE.search(v):
-        raise ConfigError(f"{k}: caracteres de control no permitidos")
+        raise bad("caracteres de control no permitidos", "Control characters are not allowed")
     if v.startswith("@"):
-        raise ConfigError(f"{k}: un valor no puede empezar por «@» (QSettings lo interpreta)")
+        raise bad("un valor no puede empezar por «@» (QSettings lo interpreta)", "A value can't start with “@”")
     if t == "number":
         n = _parse_number(v)
         if n is None:
-            raise ConfigError(f"{k}: se esperaba un número")
+            raise bad("se esperaba un número", "Expected a number")
         if not e["min"] <= n <= e["max"]:
-            raise ConfigError(f"{k}: fuera de rango ({e['min']}–{e['max']})")
+            raise bad(f"fuera de rango ({e['min']}–{e['max']})",
+                      f"Use a value between {_g(e['min'])} and {_g(e['max'])}")
         return float(n)
     if t == "integer":
         if not INT_RE.match(v):
-            raise ConfigError(f"{k}: se esperaba un entero")
+            raise bad("se esperaba un entero", "Expected a whole number")
         n = int(v)
         if e.get("allowZero") and n == 0:
             return 0
         if not e["min"] <= n <= e["max"]:
             extra = " o 0" if e.get("allowZero") else ""
-            raise ConfigError(f"{k}: fuera de rango ({e['min']}–{e['max']}{extra})")
+            raise bad(f"fuera de rango ({e['min']}–{e['max']}{extra})",
+                      f"Use a value between {_g(e['min'])} and {_g(e['max'])}"
+                      + (", or 0 to turn it off" if e.get("allowZero") else ""))
         return n
     if t == "bool":
         lv = v.lower()
@@ -195,23 +245,24 @@ def strict(e: dict, raw: str):
             return True
         if lv in FALSE:
             return False
-        raise ConfigError(f"{k}: se esperaba true o false")
+        raise bad("se esperaba true o false", "Expected true or false")
     if t == "enum":
         lv = v.lower()
         if lv not in e["values"]:
-            raise ConfigError(f"{k}: valores permitidos: {', '.join(e['values'])}")
+            raise bad(f"valores permitidos: {', '.join(e['values'])}", f"Allowed values: {', '.join(e['values'])}")
         return lv
     if t == "color":
         if not COLOR_RE.match(v):
-            raise ConfigError(f"{k}: se esperaba un color #RRGGBB o #AARRGGBB")
+            raise bad("se esperaba un color #RRGGBB o #AARRGGBB", "Expected a colour like #rrggbb or #aarrggbb")
         return v.lower()
     if t == "string":
         if v == "":
             return ""
         if len(v) > e.get("maxLength", 256):
-            raise ConfigError(f"{k}: demasiado largo (máximo {e.get('maxLength', 256)})")
+            raise bad(f"demasiado largo (máximo {e.get('maxLength', 256)})",
+                      f"Too long (at most {e.get('maxLength', 256)} characters)")
         if not re.match(e["pattern"], v):
-            raise ConfigError(f"{k}: contiene caracteres no permitidos")
+            raise bad("contiene caracteres no permitidos", "Some characters are not allowed here")
         return v
     if t == "path":
         return strict_path(e, v)
@@ -223,13 +274,15 @@ def strict_path(e: dict, v: str) -> str:
     if v == "":
         return ""
     if ".." in v or "//" in v or "\\" in v:
-        raise ConfigError(f"{k}: ruta no permitida")
+        raise ConfigError(f"{k}: ruta no permitida", key=k, en="This path is not allowed")
     m = THEME_ASSET_RE.match(v) or SYSTEM_PATH_RE.match(v)
     if not m:
         raise ConfigError(f"{k}: sólo se aceptan backgrounds/<nombre>.<ext> (gestionado por «wallpaper set») "
-                          "o una imagen bajo /usr/share")
+                          "o una imagen bajo /usr/share", key=k,
+                          en="Choose the image with “wallpaper set”, or use an image under /usr/share")
     if m.group(1).lower() not in e.get("extensions", []):
-        raise ConfigError(f"{k}: extensión no permitida ({', '.join(e.get('extensions', []))})")
+        raise ConfigError(f"{k}: extensión no permitida ({', '.join(e.get('extensions', []))})", key=k,
+                          en=f"File type not allowed (use {', '.join(e.get('extensions', []))})")
     return v
 
 

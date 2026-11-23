@@ -39,6 +39,8 @@ Item {
     readonly property bool warned: root.backend.warnings.some(w => w.key === root.key)
     /** Lo que no se envió por no valer (en inglés, junto al campo). Se borra al siguiente cambio válido. */
     property string problem: ""
+    /** Lo que la CLI rechazó de esta clave en la última escritura (`fields` de su respuesta). */
+    readonly property string rejected: String(root.backend.fieldErrors[root.key] || "")
 
     function send(v) { root.problem = ""; root.backend.set(root.key, v); }
 
@@ -80,8 +82,9 @@ Item {
             Label {
                 objectName: "caption"
                 visible: text.length > 0
-                text: root.problem.length > 0 ? root.problem : root.caption
-                color: root.problem.length > 0 || root.warned ? Tones.error : palette.placeholderText
+                text: root.problem.length > 0 ? root.problem : root.rejected.length > 0 ? root.rejected : root.caption
+                color: root.problem.length > 0 || root.rejected.length > 0 || root.warned ? Tones.error
+                                                                                        : palette.placeholderText
                 wrapMode: Text.Wrap
                 font.pointSize: Qt.application.font.pointSize * 0.9
                 Layout.fillWidth: true

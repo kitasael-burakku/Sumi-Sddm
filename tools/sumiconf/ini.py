@@ -32,24 +32,24 @@ def _unquote(raw: str, lineno: int) -> str:
         c = raw[i]
         if c == "\\":
             if i + 1 >= len(raw) or raw[i + 1] not in '"\\':
-                raise ConfigError(f"línea {lineno}: escape no permitido")
+                raise ConfigError(f"línea {lineno}: escape no permitido", en=f"Your settings file, line {lineno}: escape not allowed")
             out.append(raw[i + 1])
             i += 2
             continue
         if c == '"':
             rest = raw[i + 1:].strip()
             if rest and not rest.startswith(";"):
-                raise ConfigError(f"línea {lineno}: texto tras las comillas")
+                raise ConfigError(f"línea {lineno}: texto tras las comillas", en=f"Your settings file, line {lineno}: text after the closing quote")
             return "".join(out)
         out.append(c)
         i += 1
-    raise ConfigError(f"línea {lineno}: comillas sin cerrar")
+    raise ConfigError(f"línea {lineno}: comillas sin cerrar", en=f"Your settings file, line {lineno}: unclosed quotes")
 
 
 def parse(text: str) -> dict[str, str]:
     """INI → {clave: cadena tal como la verá QSettings}. Lanza ConfigError ante cualquier ambigüedad."""
     if len(text.encode("utf-8")) > MAX_BYTES:
-        raise ConfigError("archivo demasiado grande")
+        raise ConfigError("archivo demasiado grande", en="Your settings file is too big")
     values: dict[str, str] = {}
     section = None
     for lineno, line in enumerate(text.splitlines(), 1):
@@ -58,29 +58,29 @@ def parse(text: str) -> dict[str, str]:
             continue
         if s.startswith("["):
             if not s.endswith("]"):
-                raise ConfigError(f"línea {lineno}: sección mal formada")
+                raise ConfigError(f"línea {lineno}: sección mal formada", en=f"Your settings file, line {lineno}: malformed section")
             section = s[1:-1].strip()
             if section != "General":
-                raise ConfigError(f"línea {lineno}: sólo se admite la sección [General]")
+                raise ConfigError(f"línea {lineno}: sólo se admite la sección [General]", en=f"Your settings file, line {lineno}: only the [General] section is allowed")
             continue
         if "=" not in s:
-            raise ConfigError(f"línea {lineno}: se esperaba clave=valor")
+            raise ConfigError(f"línea {lineno}: se esperaba clave=valor", en=f"Your settings file, line {lineno}: expected key=value")
         if section != "General":
-            raise ConfigError(f"línea {lineno}: clave fuera de [General]")
+            raise ConfigError(f"línea {lineno}: clave fuera de [General]", en=f"Your settings file, line {lineno}: key outside [General]")
         key, raw = s.split("=", 1)
         key, raw = key.strip(), raw.strip()
         if not KEY_RE.match(key):
-            raise ConfigError(f"línea {lineno}: nombre de clave inválido")
+            raise ConfigError(f"línea {lineno}: nombre de clave inválido", en=f"Your settings file, line {lineno}: invalid key name")
         if key in values:
-            raise ConfigError(f"línea {lineno}: clave repetida «{key}»")
+            raise ConfigError(f"línea {lineno}: clave repetida «{key}»", en=f"Your settings file, line {lineno}: “{key}” appears twice")
         if raw.startswith('"'):
             value = _unquote(raw, lineno)
         else:
             if any(c in raw for c in ',;"\\'):
-                raise ConfigError(f"línea {lineno}: «{key}» necesita comillas (contiene , ; \" o \\)")
+                raise ConfigError(f"línea {lineno}: «{key}» necesita comillas (contiene , ; \" o \\)", en=f"Your settings file, line {lineno}: “{key}” needs quotes")
             value = raw
         if value.startswith("@"):
-            raise ConfigError(f"línea {lineno}: un valor no puede empezar por «@»")
+            raise ConfigError(f"línea {lineno}: un valor no puede empezar por «@»", en=f"Your settings file, line {lineno}: a value can't start with “@”")
         values[key] = value
     return values
 
@@ -93,9 +93,9 @@ def validate(schema: Schema, values: dict[str, str]) -> dict:
         try:
             out[key] = strict(schema.entry(key), raw)
         except ConfigError as exc:
-            errors.append(str(exc))
+            errors.append(exc)
     if errors:
-        raise ConfigError("; ".join(errors))
+        raise ConfigError.combine(errors)
     return out
 
 
@@ -117,9 +117,9 @@ def read_file(path: Path) -> str:
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
-            raise ConfigError(f"{path}: no es un archivo regular")
+            raise ConfigError(f"{path}: no es un archivo regular", en=f"{path} is not a regular file")
         if st.st_size > MAX_BYTES:
-            raise ConfigError(f"{path}: demasiado grande")
+            raise ConfigError(f"{path}: demasiado grande", en=f"{path} is too big")
         with os.fdopen(fd, "rb", closefd=False) as f:
             data = f.read(MAX_BYTES + 1)
     finally:
@@ -127,7 +127,7 @@ def read_file(path: Path) -> str:
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ConfigError(f"{path}: no es UTF-8") from exc
+        raise ConfigError(f"{path}: no es UTF-8", en=f"{path} is not UTF-8 text") from exc
 
 
 def write_atomic(path: Path, text: str, mode: int = 0o644) -> None:
@@ -135,7 +135,7 @@ def write_atomic(path: Path, text: str, mode: int = 0o644) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     if path.is_symlink():
-        raise ConfigError(f"{path}: es un enlace simbólico; no se escribe a través de él")
+        raise ConfigError(f"{path}: es un enlace simbólico; no se escribe a través de él", en=f"{path} is a symbolic link; it is not written through")
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:

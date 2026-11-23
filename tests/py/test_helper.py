@@ -354,7 +354,16 @@ class CliSystem(Base):
 
     def test_denied_and_helper_errors(self):
         env = dict(self.env, SUMI_SDDM_PKEXEC=self.deny)
-        self.assertEqual(self.cli("system", "apply", env=env, rc=1)["code"], "denied")
+        d = self.cli("system", "apply", env=env, rc=1)
+        self.assertEqual((d["code"], d["message"]), ("denied", "Authentication cancelled or denied; nothing changed"))
+        # El helper (root) responde en español: la CLI añade el inglés por código y deja pasar los detalles.
+        fake = self.t / "bin" / "pkexec-probe"
+        fake.write_text("#!/bin/sh\necho '{\"ok\": false, \"api\": 1, \"code\": \"probe\", "
+                        "\"error\": \"el tema falló\", \"problems\": [\"Main.qml:1: boom\"]}'\nexit 1\n")
+        fake.chmod(0o755)
+        d = self.cli("system", "apply", env=dict(self.env, SUMI_SDDM_PKEXEC=str(fake)), rc=1)
+        self.assertEqual((d["code"], d["error"], d["problems"]), ("probe", "el tema falló", ["Main.qml:1: boom"]))
+        self.assertEqual(d["message"], "The theme failed its test with these settings; nothing changed")
         shutil.rmtree(self.theme)
         self.assertEqual(self.cli("system", "apply", rc=1)["code"], "missing")
         env = dict(self.env, SUMI_SDDM_HELPER=str(self.t / "nope"))

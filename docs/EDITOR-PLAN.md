@@ -145,7 +145,10 @@ de guardar, recarga que pisa lo pendiente, apply sin esperar, Try sin dos pulsac
   Sigue para la fase 3: el selector de fuentes (hoy `fontFamily` es un campo de texto), el avatar y la vista previa.
 - Antes de enviar se comprueba lo evidente (rango, hex, `pattern` del esquema) para dar el aviso en inglés junto
   al campo. Si aun así la CLI rechaza algo, su mensaje (en español) se enseña en el pie, como en Settings.
-  Pendiente: que la CLI dé esos errores también en inglés, como ya hace con `warnings`.
+  Hecho en 0.6.1: todo error JSON trae `message` en inglés y, si es de claves, `fields: [{key, message}]`; el
+  editor enseña `message` en el pie y cada `fields[]` junto a su campo («2 settings were not saved · see the
+  fields»). `error` sigue en español para la terminal y para Settings de Sumi Shell (que no se ha tocado: sigue
+  enseñando `error`). Una prueba (AST) exige `en=` en todo error que pueda ver una interfaz.
 - Al cerrar con una escritura pendiente (los 300 ms de agrupado), se escribe antes de salir (`flushNow`).
 - Pruebas: `tests/py/test_editor_ui.py`, offscreen y con eventos reales (clic, teclas, Enter con el foco). Cada
   prueba exige cero avisos de QML. El criterio de salida se prueba con la CLI del repositorio y un

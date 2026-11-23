@@ -8,6 +8,8 @@ intactos. Lo que se puede forzar desde `state.json`:
   garbage               `version` escribe basura y sale con 1
   delay                 {verbo: segundos} antes de responder ("show", "preview", "apply", "version"…)
   busy_next             nº de escrituras siguientes que fallan con code "busy"
+  reject                {clave: mensaje}: `config set` de esas claves falla con code "invalid" y `fields`
+  old_cli               True: los errores sin `message` ni `fields` (una CLI anterior a 0.6.1)
   deny                  `system apply|activate|deactivate` → code "denied" (polkit cancelado)
   sys_fail              {code, error, problems?}: lo que responde `system apply|activate|deactivate` (p. ej. probe)
   installed             False: `system status` → code "missing" (el paquete no está)
@@ -102,8 +104,14 @@ def main() -> int:
         print(json.dumps({"ok": ok, "api": st.get("api", 1), **doc}))
         return 0 if ok else 1
 
-    def fail(code: str, error: str, **extra) -> int:
-        return reply({"code": code, "error": error, **extra}, ok=False)
+    def fail(code: str, error: str, message: str = "", **extra) -> int:
+        # Como la CLI real: `error` para la terminal (en español) y `message` en inglés para interfaces.
+        doc = {"code": code, "error": error, **extra}
+        if not st.get("old_cli"):
+            doc["message"] = message or f"(en) {error}"
+        else:
+            doc.pop("fields", None)
+        return reply(doc, ok=False)
 
     def save(mutate) -> dict:
         with open(D / "state.lock", "a") as lk2:
@@ -136,9 +144,16 @@ def main() -> int:
     if tuple(args[:2]) in writes:
         if st.get("busy_next", 0) > 0:
             save(lambda s: s.update(busy_next=s["busy_next"] - 1))
-            return fail("busy", "another sumi-sddm operation is running")
+            return fail("busy", "otra operación de sumi-sddm está en curso",
+                        "Another sumi-sddm operation is running; try again")
         if expect is not None and expect != cur_stamp:
-            return fail("conflict", "changed since read", stamp=cur_stamp)
+            return fail("conflict", "la configuración cambió", "The settings changed since they were read",
+                        stamp=cur_stamp)
+        bad = [(k, st.get("reject", {})[k]) for k in (a.partition("=")[0] for a in args[2:])
+               if args[:2] == ["config", "set"] and k in st.get("reject", {})]
+        if bad:
+            return fail("invalid", "; ".join(f"{k}: no vale" for k, _ in bad),
+                        "; ".join(f"{k}: {m}" for k, m in bad), fields=[{"key": k, "message": m} for k, m in bad])
 
         def mutate(s):
             v = s.setdefault("values", {})

@@ -11,8 +11,19 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 
   ```json
   {"ok": true,  "api": 1, ...}
-  {"ok": false, "api": 1, "code": "<código>", "error": "<texto para personas, en español>", ...}
+  {"ok": false, "api": 1, "code": "<código>", "error": "<texto para la terminal, en español>",
+   "message": "<the same for an interface, in English>", "fields": [{"key": "…", "message": "…"}], ...}
   ```
+
+- **Mensajes de error** (desde 0.6.1; `api` sigue en 1 porque sólo se añaden campos):
+  - `error`: el texto de siempre, en español; es lo que se ve en la terminal.
+  - `message`: el mismo en **inglés**, de una línea, para interfaces. Siempre está: si un error no trae el suyo,
+    es el genérico de su `code`. Un cliente debe enseñar `message` y, si falta (una CLI anterior), `error`.
+  - `fields` (sólo si el error es de claves concretas, p. ej. `config set`): `[{key, message}]`, con el mensaje
+    **sin** el nombre de la clave, para enseñarlo junto a su campo. En `config set` es todo o nada: si una pareja
+    falla no se escribe ninguna, y `fields` las lista todas. Una clave desconocida también va en `fields`.
+  - Los errores del helper de root (`system …`) llegan con su `error` en español y `message` en inglés por
+    código; sus detalles (`problems`…) pasan tal cual.
 
 - **Códigos de salida.**
   - `0`: correcto.
@@ -20,20 +31,20 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
   - `2`: uso incorrecto. Cuando el error lo detecta el analizador de argumentos (orden o argumento que no
     existe, `--expect` mal formado), sale texto en la salida de errores y **no hay JSON**. Un cliente con
     verbos fijos no debería verlo nunca.
-- **`code` es estable; `error` no.** No conviene analizar el texto de `error`.
+- **`code` es estable; `error` y `message` no.** No conviene analizar su texto.
 
 | `code` | Significado | Qué hacer |
 |---|---|---|
-| `invalid` | valor, clave o archivo no válidos (también un `theme.conf.user` roto) | enseñar `error` |
+| `invalid` | valor, clave o archivo no válidos (también un `theme.conf.user` roto). Con `fields` si son claves | enseñar `message`; cada `fields[]` junto a su campo |
 | `conflict` | `--expect` no coincide: otro cambió la configuración. Lleva `stamp` (la actual). En `install`/`uninstall`: `~/.local/bin/sumi-sddm` no es nuestro | recargar `config show` y avisar |
 | `busy` | otra operación tiene el bloqueo (más de 5 s) o ya hay una ventana `try` abierta | reintentar más tarde |
-| `missing` | falta algo necesario: copia `.prev`, `fc-list` | enseñar `error` |
-| `io` | error del sistema de archivos (permisos, enlace simbólico donde no debe haberlo) | enseñar `error` |
-| `render` | la vista previa no se pudo generar | enseñar `error` |
+| `missing` | falta algo necesario: copia `.prev`, `fc-list` | enseñar `message` |
+| `io` | error del sistema de archivos (permisos, enlace simbólico donde no debe haberlo) | enseñar `message` |
+| `render` | la vista previa no se pudo generar | enseñar `message` |
 | `unsupported` | orden de desarrollo en la copia instalada, o `install` fuera del repositorio | — |
 | `usage` | operación desconocida | — |
 | `denied` | `system …`: la autenticación de polkit se canceló o se denegó; no se cambió nada | volver a intentarlo si se quiere |
-| `probe` | `system …`: el tema no superó la prueba con el greeter real como `sddm`; no se cambió nada. Lleva `problems` | enseñar `error` y `problems` |
+| `probe` | `system …`: el tema no superó la prueba con el greeter real como `sddm`; no se cambió nada. Lleva `problems` | enseñar `message` y `problems` |
 
 ## Huella y concurrencia
 

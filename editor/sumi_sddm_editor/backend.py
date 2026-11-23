@@ -105,6 +105,7 @@ class Backend(QObject):
     systemBusyChanged = Signal()
     avatarChanged = Signal()
     systemLogChanged = Signal()
+    fieldErrorsChanged = Signal()
     busyChanged = Signal()
     writeCountChanged = Signal()
     previewUrlChanged = Signal()
@@ -136,6 +137,7 @@ class Backend(QObject):
     systemBusy = _ro(str, "systemBusy", systemBusyChanged)          # "" · apply · activate · deactivate
     avatar = _ro("QVariant", "avatar", avatarChanged)               # `avatar info` o None
     systemLog = _ro("QVariant", "systemLog", systemLogChanged)      # `system log` (último arranque) o None
+    fieldErrors = _ro("QVariantMap", "fieldErrors", fieldErrorsChanged)  # clave → por qué no se guardó
     busy = _ro(bool, "busy", busyChanged)
     writeCount = _ro(int, "writeCount", writeCountChanged)          # escrituras aceptadas (diagnóstico, pruebas)
     previewUrl = _ro(str, "previewUrl", previewUrlChanged)
@@ -167,6 +169,7 @@ class Backend(QObject):
         self._system: dict | None = None
         self._avatar: dict | None = None
         self._systemLog: dict | None = None
+        self._fieldErrors: dict = {}
         self._busy = False
         self._writeCount = 0
         self._previewUrl = self._previewStamp = ""
@@ -349,6 +352,9 @@ class Backend(QObject):
 
     @staticmethod
     def _err(doc: dict | None, fallback: str) -> str:
+        """El texto para la persona: `message` (inglés, para interfaces) o, de una CLI anterior, `error`."""
+        if doc and doc.get("message"):
+            return str(doc["message"])
         return str(doc["error"]) if doc and doc.get("error") else fallback
 
     @staticmethod
@@ -538,6 +544,8 @@ class Backend(QObject):
         vals = dict(self._values)
         vals[key] = {**vals.get(key, {}), "value": shown, "set": not unset}
         self._put("values", vals)
+        if key in self._fieldErrors:                 # se está corrigiendo: el aviso anterior ya no vale
+            self._put("fieldErrors", {k: v for k, v in self._fieldErrors.items() if k != key})
         self._clear_messages()
         self._write_timer.start()
         self._refresh_busy()
@@ -594,6 +602,7 @@ class Backend(QObject):
 
     def _written(self, doc: dict | None, _code: int) -> None:
         if self._ok(doc):
+            self._put("fieldErrors", {})
             self._put("writeCount", self._writeCount + 1)
             self._set_stamp(str(doc.get("stamp") or self._stamp))
             self.reload()                 # y, tras ella, `system status`: lo aplicado deja de coincidir
@@ -604,7 +613,12 @@ class Backend(QObject):
             self._write_timer.stop()
             self._put("notice", "Changed outside the editor · reloaded")
         else:
-            self._put("error", self._err(doc, "sumi-sddm could not save the change"))
+            fields = {str(f["key"]): str(f["message"]) for f in (doc or {}).get("fields") or []
+                      if isinstance(f, dict) and f.get("key") and f.get("message")}
+            self._put("fieldErrors", fields)
+            n = len(fields)
+            self._put("error", self._err(doc, "sumi-sddm could not save the change") if n == 0 else
+                      ("1 setting was not saved · see the field" if n == 1 else f"{n} settings were not saved · see the fields"))
         self.reload()
 
     @Slot("QVariant")
