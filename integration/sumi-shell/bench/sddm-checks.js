@@ -34,7 +34,7 @@ function cases(w, sddm, settings, ui) {
             test(p.infoValue({ id: "sddmStatus" }) === (want === "missing" ? "Not installed" : "Incompatible version"),
                  "la fila de estado lo dice");
             const cap = p.captionOf({ id: "sddmStatus" });
-            test(want === "missing" ? cap.indexOf("install --user") >= 0 : cap.indexOf("version 2") >= 0,
+            test(want === "missing" ? cap.indexOf("sumi-sddm package") >= 0 : cap.indexOf("version 2") >= 0,
                  "el pie explica qué hacer: " + cap);
             test(p.rowReason({ id: "sddmApply", kind: "action" }).length > 0, "las acciones quedan desactivadas");
             test(p.rowReason({ id: "sddmOpen", kind: "action" }) === "", "Open sigue disponible (la ventana lo explica)");

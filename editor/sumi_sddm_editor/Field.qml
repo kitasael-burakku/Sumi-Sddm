@@ -56,7 +56,7 @@ Item {
         divider: root.divider
 
         title: root.label
-        description: root.problem || root.rejected || (root.type === "path" && !root.warned ? "" : root.caption)
+        description: root.problem || root.rejected || root.caption
         descriptionColor: root.problem || root.rejected || root.warned ? Tones.error : Tones.muted
         modified: root.isSet
         resettable: root.type !== "path"

@@ -842,6 +842,14 @@ class EditorUiRealCliTest(RealCliCase):
         self.assertEqual(self.control("dateFormat", "text").property("text"), "d MMM", "enseña lo guardado")
         self.no_warnings()
 
+    def test_path_shows_its_help(self):
+        """Como la ventana de Sumi Shell: la fila del fondo enseña la ayuda del esquema."""
+        self.open(program=str(CLI))
+        self.ready()
+        self.show("background")
+        self.assertEqual(self.control("background", "caption").property("text"), self.b.keys["background"]["help"])
+        self.assertTrue(self.control("background", "caption").isVisible())
+
     def test_preview_reflects_each_change(self):
         """La vista previa real (qml offscreen) cambia con lo guardado: el color base se ve en la esquina."""
         self.open(program=str(CLI), preview_timeout_ms=120_000)

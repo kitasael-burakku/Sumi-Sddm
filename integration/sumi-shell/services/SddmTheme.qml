@@ -521,7 +521,7 @@ Singleton {
     function captionText(id) {
         switch (id) {
         case "sddmStatus":
-            if (root.status === "missing") return "Install it from the Sumi SDDM folder with: tools/sumi-sddm install --user";
+            if (root.status === "missing") return "Install the sumi-sddm package, which provides the command";
             if (root.status === "incompatible" || root.status === "broken") return root.statusDetail;
             if (root.error.length > 0) return root.error;
             if (root.notice.length > 0) return root.notice;
