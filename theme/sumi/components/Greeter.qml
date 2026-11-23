@@ -151,7 +151,7 @@ FocusScope {
         else
             root.forceActiveFocus();
         // Sólo recuentos: nada de nombres ni datos sensibles en el registro.
-        console.info("sumi-sddm: ready users=" + userCount + " sessions=" + sessionCount + " primary=" + primary + " clock=" + (st.clock24h ? "24h" : "12h"));
+        console.info("sumi-sddm: ready users=" + userCount + " sessions=" + sessionCount + " primary=" + primary + " clock=" + (st.clock24h ? "24h" : "12h") + " custom=" + st.customCount());
         ready = true;
     }
     Component.onCompleted: Qt.callLater(init)
@@ -427,16 +427,17 @@ FocusScope {
     // ── Reloj ───────────────────────────────────────────────────────────────────────────
     Clock {
         id: clock
+        objectName: "clock"
         style: st
         readonly property real margin: st.px(56)
         readonly property bool atLeft: st.clockPosition.endsWith("left")
         readonly property bool atRight: st.clockPosition.endsWith("right")
         width: Math.min(root.width - 2 * margin, st.px(900) * st.clockScale)
         align: atLeft ? Text.AlignLeft : atRight ? Text.AlignRight : Text.AlignHCenter
-        x: atLeft ? margin : atRight ? root.width - width - margin : (root.width - width) / 2
-        y: st.clockPosition === "center"
-           ? Math.max(root.height * 0.2, (notch.visible ? notch.height : 0) + st.px(40))
-           : st.clockPosition.startsWith("top") ? margin : root.height - implicitHeight - margin
+        x: (atLeft ? margin : atRight ? root.width - width - margin : (root.width - width) / 2) + st.px(st.clockOffsetX)
+        y: (st.clockPosition === "center"
+            ? Math.max(root.height * 0.2, (notch.visible ? notch.height : 0) + st.px(40))
+            : st.clockPosition.startsWith("top") ? margin : root.height - implicitHeight - margin) + st.px(st.clockOffsetY)
         Behavior on y {
             NumberAnimation {
                 duration: st.dur(460)
@@ -455,7 +456,7 @@ FocusScope {
                  && (root.userCount > 1 || (root.userCount === 1 && (st.userStrip === "always" || showOther)))
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: st.px(64)
+        anchors.bottomMargin: st.px(st.userStripMargin)
         width: root.width - st.px(64)
         model: root.users
         count: root.userCount
@@ -542,7 +543,7 @@ FocusScope {
                     elide: Text.ElideRight
                     color: st.textDim
                     font.family: st.fontFamily
-                    font.pixelSize: st.px(12.5)
+                    font.pixelSize: st.fs(12.5)
                     font.weight: Font.Medium
                     anchors.verticalCenter: parent.verticalCenter
                 }
@@ -568,7 +569,7 @@ FocusScope {
                     elide: Text.ElideRight
                     color: st.text
                     font.family: st.fontFamily
-                    font.pixelSize: st.px(15)
+                    font.pixelSize: st.fs(15)
                     font.weight: Font.DemiBold
                 }
 
@@ -685,7 +686,7 @@ FocusScope {
                         maximumLineCount: 2
                         elide: Text.ElideRight
                         font.family: st.fontFamily
-                        font.pixelSize: st.px(13)
+                        font.pixelSize: st.fs(13)
                         Accessible.role: Accessible.AlertMessage
                         Accessible.name: root.message
                     }
@@ -783,7 +784,7 @@ FocusScope {
                         text: "Session"
                         color: st.text
                         font.family: st.fontFamily
-                        font.pixelSize: st.px(15)
+                        font.pixelSize: st.fs(15)
                         font.weight: Font.DemiBold
                     }
                 }
@@ -827,7 +828,7 @@ FocusScope {
                             elide: Text.ElideRight
                             color: st.text
                             font.family: st.fontFamily
-                            font.pixelSize: st.px(14)
+                            font.pixelSize: st.fs(14)
                             font.weight: srow.index === root.sessionIndex ? Font.DemiBold : Font.Normal
                         }
                         Icon {
@@ -886,7 +887,7 @@ FocusScope {
                         text: confirmPage.c[1]
                         color: st.text
                         font.family: st.fontFamily
-                        font.pixelSize: st.px(15)
+                        font.pixelSize: st.fs(15)
                         font.weight: Font.DemiBold
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -897,7 +898,7 @@ FocusScope {
                     text: confirmPage.c[2]
                     color: st.textDim
                     font.family: st.fontFamily
-                    font.pixelSize: st.px(13)
+                    font.pixelSize: st.fs(13)
                 }
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter

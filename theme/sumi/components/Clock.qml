@@ -45,7 +45,7 @@ Column {
             color: root.style.text
             font.family: root.style.fontFamily
             font.pixelSize: root.style.px(104) * root.style.clockScale
-            font.weight: Font.Light
+            font.weight: root.style.clockWeight
             font.letterSpacing: -root.style.px(2) * root.style.clockScale
             font.features: { "tnum": 1 }
             renderType: Text.QtRendering

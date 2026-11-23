@@ -4,45 +4,56 @@ Tema de inicio de sesión para SDDM (≥ 0.21, Qt 6): minimalista, con una notch
 autenticación. Compatible con Sumi Shell, pero **independiente**: no usa Quickshell, Hyprland ni ningún
 servicio de Sumi.
 
-> Estado: Fase 2 (tema funcional, sin instalador). **No está instalado ni activado** en el sistema.
+> Estado: Fase 3 (tema funcional y configurable, sin instalador). **No está instalado ni activado** en el sistema.
 
 ## Estructura
 
 ```
-theme/sumi/              lo que se instalará en /usr/share/sddm/themes/sumi
-  metadata.desktop       QtVersion=6, ConfigFile=theme.conf
-  theme.conf             valores por defecto documentados (las personalizaciones van en theme.conf.user)
-  Main.qml               adaptador: contexto de SDDM → propiedades de Greeter
-  components/            Greeter, Style (config validada), Notch, NotchShape, Background, Clock,
-                         UserStrip, Avatar, InputField, IconButton, PillButton, Spinner, Icon
-  assets/fonts/          Inter 4 sin modificar + OFL.txt
-tests/harness/           dobles de SDDM (MockBackend/Users/Sessions/Keyboard) y Render.qml (capturas)
-tests/qml/               pruebas de comportamiento (qmltestrunner)
-tests/fixtures/          theme.conf.user de prueba (válido y con basura)
-tools/sumi-sddm          herramientas de desarrollo (sin privilegios)
-docs/                    auditoría e informes por fase
+schema/config-schema.json  fuente única de la configuración (claves, tipos, rangos, defaults, etiquetas de UI)
+theme/sumi/                lo que se instalará en /usr/share/sddm/themes/sumi
+  metadata.desktop         QtVersion=6, ConfigFile=theme.conf
+  theme.conf               defaults documentados (GENERADO desde el esquema)
+  Main.qml                 adaptador: contexto de SDDM → propiedades de Greeter
+  components/              Greeter, Style, Notch, NotchShape, Background, Clock, UserStrip, Avatar, controles
+    config.js              lectura tolerante (paridad con tools/sumiconf/schema.py)
+    schema.js              GENERADO desde el esquema
+  assets/fonts/            Inter 4 sin modificar + OFL.txt
+tools/sumi-sddm            CLI (sin privilegios): config, wallpaper, preview, try, gen y desarrollo
+tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas
+tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
+tests/py/                  pruebas de sumiconf y de la CLI
+tests/qml/                 pruebas del Greeter y de la paridad de configuración (qmltestrunner)
+tests/fixtures/            casos compartidos Python/QML y theme.conf.user de prueba
+docs/                      auditoría, informes por fase y CONFIG.md (GENERADO)
 ```
+
+## Configuración (sin privilegios)
+
+La configuración personal vive en `~/.config/sumi-sddm/` (`theme.conf.user` y `backgrounds/`). El tema
+instalado no se toca: aplicarla al sistema será trabajo del helper de la Fase 5. Claves: [docs/CONFIG.md](docs/CONFIG.md).
+
+```sh
+tools/sumi-sddm config show                       # * = personalizado
+tools/sumi-sddm config set clockFormat=12h accentColor=#ffb38a   # valida todo o no escribe nada
+tools/sumi-sddm config unset clockFormat
+tools/sumi-sddm wallpaper set ~/Imágenes/fondo.jpg               # valida y copia; clear | info
+tools/sumi-sddm preview                           # PNG en ~/.cache/sumi-sddm/preview/
+tools/sumi-sddm try --yes                         # ventana --test-mode (toma el teclado)
+```
+
+Todas aceptan `--json` (lo usará Settings de Sumi Shell).
 
 ## Desarrollo
 
 ```sh
-tools/sumi-sddm lint                 # qmllint, 0 avisos exigidos
-tools/sumi-sddm test                 # qmltestrunner, renderizador software y OpenGL (offscreen)
+tools/sumi-sddm gen                  # tras editar schema/config-schema.json
+tools/sumi-sddm check                # gen --check + lint + pruebas (Python y QML, software y OpenGL) + humo
 tools/sumi-sddm render --size all    # capturas de todos los escenarios en tests/out/
-tools/sumi-sddm smoke                # greeter REAL (--test-mode, offscreen) sobre una copia en ~/.cache
-tools/sumi-sddm check                # lint + test + smoke
 ```
 
-Nada de esto abre ventanas, pide privilegios ni toca `/etc`, `/usr` o la configuración de SDDM.
-
-Para verlo en una ventana (roba el foco del teclado mientras esté abierta; se cierra con la ventana):
-
-```sh
-sddm-greeter-qt6 --test-mode --theme ~/.cache/sumi-sddm/smoke/sumi   # tras un `smoke`
-```
-
-En `--test-mode` no hay daemon: el inicio de sesión no se autentica y los botones de energía no
-hacen nada.
+`smoke` carga el tema en el greeter REAL (`sddm-greeter-qt6 --test-mode`, offscreen) desde una copia en
+`~/.cache/sumi-sddm/` y comprueba, por el registro, que su QSettings lee exactamente las claves esperadas.
+En `--test-mode` no hay daemon: no se autentica ni se apaga de verdad.
 
 ## Teclado
 

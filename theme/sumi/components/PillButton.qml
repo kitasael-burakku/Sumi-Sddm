@@ -14,7 +14,7 @@ Item {
     property string kind: "normal"
     property real minWidth: style.px(96)
     property real maxWidth: style.px(260)
-    property real fontSize: style.px(13.5)
+    property real fontSize: style.fs(13.5)
 
     signal clicked
 

@@ -2,7 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtTest
 import "../../theme/sumi/components"
-import "../harness"
+import "../../tools/harness"
 
 /*
  * Comportamiento del Greeter con dobles de SDDM: teclado, foco, autenticación, errores, energía,
@@ -523,6 +523,29 @@ TestCase {
         compare(g.style.dur(400), 0);
         make({ cfg: { "animations": "true", "animationSpeed": "2" } });
         compare(g.style.dur(400), 200);
+    }
+
+    function test_user_strip_appearance_keys() {
+        make({ cfg: { "userNames": "false", "userInactiveOpacity": "0.3", "userStripMargin": "120" } });
+        const strip = find(g, "userStrip");
+        compare(strip.anchors.bottomMargin, g.style.px(120));
+        const tile = find(g, "userTile0");
+        tryCompare(tile, "opacity", 0.3);
+        compare(find(g, "userTile1").opacity, 1, "selected tile stays opaque");
+    }
+
+    function test_clock_offset_and_font_scale() {
+        make();
+        const clock = find(g, "clock");
+        const x0 = clock.x;
+        const y0 = clock.y;
+        const field = pw().input;
+        const fs0 = field.font.pixelSize;
+        make({ cfg: { "clockOffsetX": "-100", "clockOffsetY": "40", "fontScale": "1.5" } });
+        const clock2 = find(g, "clock");
+        compare(clock2.x, x0 - g.style.px(100));
+        compare(clock2.y, y0 + g.style.px(40));
+        fuzzyCompare(pw().input.font.pixelSize, fs0 * 1.5, 1);
     }
 
     function test_scale_follows_resolution() {

@@ -1,13 +1,15 @@
 import QtQuick
 import QtQuick.Window
-import "../../theme/sumi/components"
 
 /*
  * Captura un escenario del Greeter a PNG con datos simulados (sin SDDM, sin ventana visible si se
  * lanza con QT_QPA_PLATFORM=offscreen). Uso:
  *
- *   qml6 tests/harness/Render.qml -- --scenario=failed --size=1920x1080 --out=/ruta.png \
- *        [--users=3] [--config='{"clockFormat":"12h"}']
+ *   qml6 tools/harness/Render.qml -- --scenario=failed --size=1920x1080 --out=/ruta.png \
+ *        [--users=3] [--config='{"clockFormat":"12h"}'] [--theme=/dir/del/tema] [--me="Nombre visible"]
+ *
+ * `--theme` permite previsualizar una copia preparada (con su theme.conf.user y su wallpaper); por defecto,
+ * el tema del repositorio. `--config` son claves crudas, tal como las entregaría QSettings.
  *
  * Las animaciones van apagadas salvo que la configuración diga lo contrario: capturas estables.
  */
@@ -17,7 +19,8 @@ Window {
     readonly property var opts: parse(Qt.application.arguments)
 
     function parse(argv) {
-        const o = { scenario: "compact", width: 1920, height: 1080, out: "", users: 3, config: {} };
+        const o = { scenario: "compact", width: 1920, height: 1080, out: "", users: 3, config: {},
+                    theme: Qt.resolvedUrl("../../theme/sumi"), me: "" };
         for (let i = 0; i < argv.length; i++) {
             const m = /^--([a-z]+)=(.*)$/.exec(argv[i]);
             if (!m)
@@ -30,6 +33,8 @@ Window {
                 o.users = Number(m[2]);
             } else if (m[1] === "config") {
                 o.config = JSON.parse(m[2]);
+            } else if (m[1] === "theme") {
+                o.theme = m[2].startsWith("/") ? "file://" + m[2] : m[2];
             } else {
                 o[m[1]] = m[2];
             }
@@ -59,7 +64,11 @@ Window {
     MockUsers {
         id: mockUsers
         lastUser: "alice"
-        Component.onCompleted: fill(win.opts.users)
+        Component.onCompleted: {
+            fill(win.opts.users);
+            if (win.opts.me !== "" && count > 0)
+                setProperty(0, "realName", win.opts.me);
+        }
     }
     MockSessions {
         id: mockSessions
@@ -67,18 +76,28 @@ Window {
         Component.onCompleted: fill(win.opts.scenario === "nosessions" ? [] : ["Hyprland", "Hyprland (uwsm-managed)", "Plasma (Wayland)"])
     }
 
-    Greeter {
-        id: g
+    readonly property var g: loader.item
+
+    Loader {
+        id: loader
         anchors.fill: parent
         focus: true
-        users: mockUsers
-        sessions: mockSessions
-        backend: mockBackend
-        keyboardState: kb
-        primary: win.opts.scenario !== "secondary"
-        cfg: Object.assign({ "animations": "false" },
-                           win.opts.scenario === "secondary" ? { "multiMonitor": "primary" } : {},
-                           win.opts.config)
+        Component.onCompleted: setSource(win.opts.theme + "/components/Greeter.qml", {
+            users: mockUsers,
+            sessions: mockSessions,
+            backend: mockBackend,
+            keyboardState: kb,
+            primary: win.opts.scenario !== "secondary",
+            cfg: Object.assign({ "animations": "false" },
+                               win.opts.scenario === "secondary" ? { "multiMonitor": "primary" } : {},
+                               win.opts.config)
+        })
+        onStatusChanged: {
+            if (status === Loader.Error) {
+                console.warn("render: could not load Greeter from " + win.opts.theme);
+                Qt.exit(3);
+            }
+        }
     }
 
     function find(item, name) {

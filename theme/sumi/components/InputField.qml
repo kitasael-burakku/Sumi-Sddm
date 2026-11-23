@@ -77,7 +77,7 @@ FocusScope {
         selectionColor: root.style.accent
         selectedTextColor: "black"
         font.family: root.style.fontFamily
-        font.pixelSize: root.style.px(15)
+        font.pixelSize: root.style.fs(15)
         font.letterSpacing: root.secret && text.length > 0 ? root.style.px(1.5) : 0
         echoMode: root.secret ? TextInput.Password : TextInput.Normal
         passwordCharacter: "•"

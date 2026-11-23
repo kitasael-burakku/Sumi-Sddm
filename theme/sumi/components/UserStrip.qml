@@ -75,7 +75,7 @@ FocusScope {
 
         width: root.tileWidth
         height: col.implicitHeight
-        opacity: current ? 1 : (hover.containsMouse ? 0.85 : 0.6)
+        opacity: current ? 1 : (hover.containsMouse ? Math.min(1, root.style.userInactiveOpacity + 0.25) : root.style.userInactiveOpacity)
         Behavior on opacity {
             NumberAnimation {
                 duration: root.style.dur(200)
@@ -135,6 +135,7 @@ FocusScope {
             }
 
             Text {
+                visible: root.style.userNames
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: Math.min(implicitWidth, root.tileWidth)
                 horizontalAlignment: Text.AlignHCenter
@@ -142,7 +143,7 @@ FocusScope {
                 elide: Text.ElideRight
                 color: root.style.text
                 font.family: root.style.fontFamily
-                font.pixelSize: root.style.px(14)
+                font.pixelSize: root.style.fs(14)
                 font.weight: tile.current ? Font.DemiBold : Font.Medium
                 style: Text.Raised
                 styleColor: Qt.rgba(0, 0, 0, 0.35)
