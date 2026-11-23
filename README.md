@@ -1,17 +1,159 @@
 # Sumi SDDM
 
-Tema de inicio de sesión para SDDM (≥ 0.21, Qt 6): minimalista, con una notch superior como centro de
-autenticación. Compatible con Sumi Shell, pero **independiente**: no usa Quickshell, Hyprland ni ningún
-servicio de Sumi.
+Un tema de inicio de sesión para **SDDM** (Qt 6), minimalista y oscuro. Todo gira en torno a una **notch** en el
+borde superior de la pantalla: está recogida mientras no la usas y se despliega en cuanto empiezas a escribir.
 
-> Estado: Fases 1–6 completas. Instalado (paquete) y activo en esta máquina, probado en real; informe final en
-> [docs/FASE6-PRUEBAS.md](docs/FASE6-PRUEBAS.md) y recuperación en [docs/RECUPERACION.md](docs/RECUPERACION.md).
+![Pantalla de inicio de Sumi SDDM con la notch desplegada](docs/screenshots/expanded.png)
 
-## Estructura
+| Notch recogida | Elegir sesión | Confirmar apagado |
+|---|---|---|
+| ![Notch recogida](docs/screenshots/compact.png) | ![Lista de sesiones](docs/screenshots/sessions.png) | ![Confirmación de apagado](docs/screenshots/confirm.png) |
+
+## Qué ofrece
+
+- **Escribe y entra.** Desde la notch recogida, la primera tecla la despliega y ya escribe en el campo de
+  contraseña. Intro inicia sesión.
+- **Todo a mano, sin ventanas.** Sesión (Hyprland, Plasma…), reiniciar y apagar viven dentro de la notch.
+  Apagar y reiniciar piden confirmación, y *Cancelar* tiene el foco por defecto.
+- **Varios usuarios**, con avatar o iniciales, y un selector en la parte inferior.
+- **Muy configurable** (41 opciones): fondo o wallpaper con desenfoque, colores, tipografía, escala, tamaño de
+  la notch, formato del reloj, animaciones, varios monitores… Lista completa en [docs/CONFIG.md](docs/CONFIG.md).
+- **Una configuración rota nunca te deja fuera.** Al configurar se valida todo de forma estricta. En la pantalla
+  de inicio, un valor que no se entiende vuelve a su valor por defecto.
+- **Se usa entera con el teclado** y es accesible: cada control tiene rol y nombre para lectores de pantalla.
+- **Independiente.** No necesita Quickshell, Hyprland ni nada más. Si usas Sumi Shell, sus ajustes incluyen
+  una página para configurarlo (ver [Integración](#integración-con-sumi-shell)).
+
+## Requisitos
+
+- SDDM ≥ 0.21 con el greeter de **Qt 6** (`sddm-greeter-qt6`).
+- `qt6-declarative`, `python`, `polkit`, `util-linux`, `systemd`.
+- Opcional: `qt6-imageformats`, para wallpapers en WebP.
+
+El paquete está pensado para **Arch Linux y derivadas** (CachyOS, EndeavourOS…). Si usas otra distribución,
+mira [Otras distribuciones](#otras-distribuciones).
+
+## Instalación (Arch Linux)
+
+```sh
+git clone https://github.com/kitasael-burakku/Sumi-Sddm.git
+cd Sumi-Sddm
+
+# 1. Construir e instalar el paquete. Esto instala el tema, pero NO lo activa.
+cd packaging/arch && makepkg
+sudo pacman -U sumi-sddm-*.pkg.tar.zst
+cd ../..
+
+# 2. Instalar el comando `sumi-sddm` para tu usuario (en ~/.local/bin, sin root).
+tools/sumi-sddm install --user
+```
+
+### Probarlo antes de activarlo
+
+Nada de esto cambia tu pantalla de inicio:
+
+```sh
+sumi-sddm preview          # genera una captura PNG con tu configuración (~/.cache/sumi-sddm/preview/)
+sumi-sddm try --yes        # abre el tema en una ventana de prueba (captura el teclado mientras está abierta)
+```
+
+### Activarlo
+
+```sh
+sumi-sddm system apply     # copia tu configuración y tu wallpaper al tema instalado (pide tu contraseña)
+sumi-sddm system activate  # Sumi será tu pantalla de inicio la PRÓXIMA vez que aparezca
+sumi-sddm system status    # comprueba qué está instalado, qué tema está activo y si tu configuración está al día
+```
+
+Para volver al tema anterior: `sumi-sddm system deactivate`.
+
+Estas órdenes usan un pequeño helper con privilegios (`/usr/lib/sumi-sddm/sumi-sddm-helper`) a través de
+polkit: piden tu contraseña cada vez y guardan una copia de seguridad antes de tocar `/etc/sddm.conf`.
+
+## Si algo sale mal
+
+Si la pantalla de inicio no responde, **no hace falta reinstalar nada**:
+
+1. Pulsa **Ctrl+Alt+F3** y entra con tu usuario en la consola de texto.
+2. Ejecuta `sudo /usr/lib/sumi-sddm/sumi-sddm-helper deactivate`. Esto repone el tema que tenías antes.
+3. Vuelve a la pantalla gráfica con **Ctrl+Alt+F1** (o F2/F7).
+
+Guía completa, incluida la forma de hacerlo a mano sin el helper: [docs/RECUPERACION.md](docs/RECUPERACION.md).
+
+## Personalizar
+
+Tu configuración vive en `~/.config/sumi-sddm/` y nunca se aplica sola. Primero la editas y después la llevas
+al sistema con `sumi-sddm system apply`.
+
+```sh
+sumi-sddm config show                                   # valores actuales (* = cambiado por ti)
+sumi-sddm config set clockFormat=12h accentColor=#ffb38a   # valida todo o no escribe nada
+sumi-sddm config unset clockFormat                      # vuelve al valor por defecto
+sumi-sddm config edit                                   # abre $EDITOR con todas las opciones comentadas
+sumi-sddm wallpaper set ~/Imágenes/fondo.jpg            # usar una imagen de fondo (también: clear, info)
+sumi-sddm avatar set ~/Imágenes/yo.png                  # tu foto de usuario
+sumi-sddm config fonts                                  # tipografías instaladas que puede usar la pantalla de inicio
+```
+
+Las opciones se agrupan en: **fondo, colores, tipografía y escala, notch, reloj, selector de usuarios, energía,
+movimiento y comportamiento**. Cada una, con su rango y su valor por defecto, está en [docs/CONFIG.md](docs/CONFIG.md).
+
+> SDDM se ejecuta como el usuario `sddm`, que no puede leer tu carpeta personal. Por eso `system apply` copia el
+> wallpaper dentro del tema instalado en lugar de enlazarlo, y las tipografías instaladas sólo en tu `$HOME` no
+> sirven (`config fonts` las marca con `~`).
+
+## Teclado
+
+| Dónde | Tecla | Acción |
+|---|---|---|
+| Notch recogida | cualquier carácter | la despliega y escribe el carácter en el campo |
+| | Intro / Espacio / ↓ | la despliega |
+| Campo de contraseña | Intro | iniciar sesión |
+| | Esc | borra lo escrito; con el campo vacío, recoge la notch |
+| Cualquier sitio | Tab / Mayús+Tab | contraseña → sesión → reiniciar → apagar → usuarios |
+| Selector de usuarios | ← / → | cambia de usuario (borra la contraseña escrita) |
+| | Intro / Espacio | vuelve al campo |
+| | cualquier carácter | lo escribe en la contraseña |
+| Lista de sesiones | ↑ / ↓, Intro | elegir · Esc: volver sin cambiar |
+| Confirmación de energía | ← / →, Intro | Cancelar tiene el foco por defecto · Esc: cancelar |
+
+## Integración con Sumi Shell
+
+Sumi SDDM funciona solo, pero si usas **Sumi Shell** (el escritorio Quickshell del mismo autor), en
+*Settings → Desktop tools → Login screen* puedes cambiar el wallpaper, los colores y el resto de opciones con
+vista previa, y aplicarlas sin abrir una terminal. Por debajo usa `sumi-sddm` con su salida `--json`, cuyo
+contrato está en [docs/CLI-JSON.md](docs/CLI-JSON.md). El código está en [integration/sumi-shell/](integration/sumi-shell/).
+
+## Otras distribuciones
+
+El tema en sí es QML puro y debería funcionar con cualquier SDDM ≥ 0.21 con Qt 6. Para instalarlo a mano:
+
+```sh
+sudo cp -r theme/sumi /usr/share/sddm/themes/sumi
+```
+
+Después pon `Current=sumi` en la sección `[Theme]` de **`/etc/sddm.conf`**. SDDM lee ese archivo el último, así
+que un archivo en `/etc/sddm.conf.d/` no basta si `/etc/sddm.conf` ya define un tema. Las órdenes
+`sumi-sddm system …` y el helper esperan las rutas del paquete de Arch. Sin ellos, copia tu
+`~/.config/sumi-sddm/theme.conf.user` a la carpeta del tema.
+
+## Desarrollo
+
+```sh
+tools/sumi-sddm check                # validación del esquema + lint + todas las pruebas (Python y QML) + humo
+tools/sumi-sddm render --size all    # capturas de todos los escenarios y resoluciones en tests/out/
+tools/sumi-sddm gen                  # regenerar theme.conf, schema.js y CONFIG.md tras editar el esquema
+```
+
+La prueba de humo (`smoke`) carga el tema en el greeter real (`sddm-greeter-qt6 --test-mode`, sin pantalla) y
+comprueba que lee exactamente la configuración esperada. En `--test-mode` no se autentica ni se apaga de verdad.
+
+<details>
+<summary>Estructura del repositorio</summary>
 
 ```
 schema/config-schema.json  fuente única de la configuración (claves, tipos, rangos, defaults, etiquetas de UI)
-theme/sumi/                lo que se instalará en /usr/share/sddm/themes/sumi
+theme/sumi/                lo que se instala en /usr/share/sddm/themes/sumi
   metadata.desktop         QtVersion=6, ConfigFile=theme.conf
   theme.conf               defaults documentados (GENERADO desde el esquema)
   Main.qml                 adaptador: contexto de SDDM → propiedades de Greeter
@@ -20,85 +162,23 @@ theme/sumi/                lo que se instalará en /usr/share/sddm/themes/sumi
     schema.js              GENERADO desde el esquema
   assets/fonts/            Inter 4 sin modificar + OFL.txt
 VERSION                    versión del proyecto (única fuente)
-tools/sumi-sddm            CLI (sin privilegios): config, wallpaper, preview, try, install --user, gen y desarrollo
-tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas,
-                           huella y bloqueo (state.py), instalación de usuario (install.py)
+tools/sumi-sddm            CLI sin privilegios: config, wallpaper, avatar, preview, try, system, install --user, gen…
+tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas, bloqueo
 tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
 system/                    helper privilegiado (pkexec) y su acción de polkit
-packaging/arch/            PKGBUILD local (tema + helper + acción); no activa nada
-integration/sumi-shell/     Settings → Login screen para Sumi Shell (servicio, controles, edit.py, deliver.py, banco)
-tests/py/                  pruebas de sumiconf y de la CLI
-tests/qml/                 pruebas del Greeter y de la paridad de configuración (qmltestrunner)
-tests/fixtures/            casos compartidos Python/QML y theme.conf.user de prueba
-docs/                      auditoría, informes por fase y CONFIG.md (GENERADO)
+packaging/arch/            PKGBUILD (tema + helper + acción); no activa nada
+integration/sumi-shell/    página Login screen para los ajustes de Sumi Shell
+tests/                     pruebas Python y QML, y casos compartidos entre ambos
+docs/                      configuración, contrato JSON, recuperación e informes de cada fase del desarrollo
 ```
 
-## Configuración (sin privilegios)
+</details>
 
-La configuración personal vive en `~/.config/sumi-sddm/` (`theme.conf.user` y `backgrounds/`). El tema
-instalado no se toca: aplicarla al sistema será trabajo del helper de la Fase 5. Claves: [docs/CONFIG.md](docs/CONFIG.md).
+Historial del desarrollo, desde la auditoría inicial hasta las pruebas en real: `docs/FASE1-AUDITORIA.md` a
+[docs/FASE6-PRUEBAS.md](docs/FASE6-PRUEBAS.md).
 
-```sh
-tools/sumi-sddm config show                       # * = personalizado
-tools/sumi-sddm config set clockFormat=12h accentColor=#ffb38a   # valida todo o no escribe nada
-tools/sumi-sddm config unset clockFormat
-tools/sumi-sddm config edit                       # $EDITOR con todas las claves comentadas; no guarda nada inválido
-tools/sumi-sddm wallpaper set ~/Imágenes/fondo.jpg               # valida y copia; clear | info
-tools/sumi-sddm avatar set ~/Imágenes/yo.png                     # tu avatar (AccountsService, sin contraseña)
-tools/sumi-sddm preview                           # PNG en ~/.cache/sumi-sddm/preview/
-tools/sumi-sddm try --yes                         # ventana --test-mode (toma el teclado)
-```
+## Licencia
 
-### En el sistema (Fase 5)
-
-```sh
-cd packaging/arch && makepkg                      # construir el paquete (sin root)
-sudo pacman -U sumi-sddm-*.pkg.tar.zst            # instalar: NO activa el tema
-tools/sumi-sddm system status                     # instalado, tema activo, ¿tu configuración aplicada?
-tools/sumi-sddm system apply                      # lleva tu configuración y wallpaper al tema (pide contraseña)
-tools/sumi-sddm system activate                   # Sumi será la pantalla de inicio la PRÓXIMA vez
-tools/sumi-sddm system deactivate                 # vuelve al tema anterior
-```
-
-Si algo sale mal en la pantalla de inicio: [docs/RECUPERACION.md](docs/RECUPERACION.md).
-
-Todas aceptan `--json`, con un contrato versionado para otros programas (Settings de Sumi Shell):
-[docs/CLI-JSON.md](docs/CLI-JSON.md). Las escrituras admiten `--expect HUELLA` para no pisar cambios ajenos.
-
-```sh
-tools/sumi-sddm config fonts                      # familias instaladas (~ = sólo en tu $HOME: el greeter no las ve)
-tools/sumi-sddm install --user                    # copia a ~/.local/share/sumi-sddm + lanzador ~/.local/bin/sumi-sddm
-tools/sumi-sddm uninstall --user                  # quita ambos; conserva ~/.config/sumi-sddm
-```
-
-## Desarrollo
-
-```sh
-tools/sumi-sddm gen                  # tras editar schema/config-schema.json
-tools/sumi-sddm check                # gen --check + lint + pruebas (Python y QML, software y OpenGL) + humo
-tools/sumi-sddm render --size all    # capturas de todos los escenarios en tests/out/
-```
-
-`smoke` carga el tema en el greeter REAL (`sddm-greeter-qt6 --test-mode`, offscreen) desde una copia en
-`~/.cache/sumi-sddm/` y comprueba, por el registro, que su QSettings lee exactamente las claves esperadas.
-En `--test-mode` no hay daemon: no se autentica ni se apaga de verdad.
-
-## Teclado
-
-| Dónde | Tecla | Acción |
-|---|---|---|
-| Notch compacta | cualquier carácter | expande y lo escribe en el campo |
-| | Intro / Espacio / ↓ | expande |
-| Campo de contraseña | Intro | iniciar sesión |
-| | Esc | borra; con el campo vacío, recoge la notch |
-| Cualquier sitio | Tab / Mayús+Tab | contraseña → sesión → reiniciar → apagar → usuarios |
-| Selector de usuarios | ← / → | cambia de usuario (borra la contraseña escrita) |
-| | Intro / Espacio | vuelve al campo |
-| | cualquier carácter | lo escribe en la contraseña |
-| Lista de sesiones | ↑ / ↓, Intro | elegir · Esc: volver sin cambiar |
-| Confirmación de energía | ← / →, Intro | Cancelar tiene el foco por defecto · Esc: cancelar |
-
-## Licencias
-
-Sumi SDDM se distribuye bajo la licencia MIT (`LICENSE`). Inter: SIL OFL 1.1 (`theme/sumi/assets/fonts/OFL.txt`).
-Iconos y fondo: dibujados en el propio QML del tema.
+Sumi SDDM se distribuye bajo la licencia [MIT](LICENSE). Incluye la tipografía Inter, con licencia SIL Open Font
+License 1.1 ([OFL.txt](theme/sumi/assets/fonts/OFL.txt)). Los iconos y el fondo por defecto están dibujados en el
+propio QML del tema.
