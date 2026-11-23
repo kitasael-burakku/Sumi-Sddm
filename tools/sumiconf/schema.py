@@ -32,7 +32,12 @@ DEFAULT_SCHEMA = Path(__file__).resolve().parents[2] / "schema" / "config-schema
 
 
 class ConfigError(ValueError):
-    pass
+    """Error para el usuario. `code` clasifica la causa en las respuestas --json (docs/CLI-JSON.md)."""
+
+    def __init__(self, message: str, code: str = "invalid", **extra):
+        super().__init__(message)
+        self.code = code
+        self.extra = extra
 
 
 @dataclass

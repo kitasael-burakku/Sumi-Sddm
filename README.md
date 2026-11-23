@@ -4,7 +4,8 @@ Tema de inicio de sesión para SDDM (≥ 0.21, Qt 6): minimalista, con una notch
 autenticación. Compatible con Sumi Shell, pero **independiente**: no usa Quickshell, Hyprland ni ningún
 servicio de Sumi.
 
-> Estado: Fase 3 (tema funcional y configurable, sin instalador). **No está instalado ni activado** en el sistema.
+> Estado: Fase 4 en curso (parte A: contrato JSON e instalación de usuario de la CLI). El tema **no está instalado
+> ni activado** en el sistema.
 
 ## Estructura
 
@@ -18,8 +19,10 @@ theme/sumi/                lo que se instalará en /usr/share/sddm/themes/sumi
     config.js              lectura tolerante (paridad con tools/sumiconf/schema.py)
     schema.js              GENERADO desde el esquema
   assets/fonts/            Inter 4 sin modificar + OFL.txt
-tools/sumi-sddm            CLI (sin privilegios): config, wallpaper, preview, try, gen y desarrollo
-tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas
+VERSION                    versión del proyecto (única fuente)
+tools/sumi-sddm            CLI (sin privilegios): config, wallpaper, preview, try, install --user, gen y desarrollo
+tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas,
+                           huella y bloqueo (state.py), instalación de usuario (install.py)
 tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
 tests/py/                  pruebas de sumiconf y de la CLI
 tests/qml/                 pruebas del Greeter y de la paridad de configuración (qmltestrunner)
@@ -41,7 +44,14 @@ tools/sumi-sddm preview                           # PNG en ~/.cache/sumi-sddm/pr
 tools/sumi-sddm try --yes                         # ventana --test-mode (toma el teclado)
 ```
 
-Todas aceptan `--json` (lo usará Settings de Sumi Shell).
+Todas aceptan `--json`, con un contrato versionado para otros programas (Settings de Sumi Shell):
+[docs/CLI-JSON.md](docs/CLI-JSON.md). Las escrituras admiten `--expect HUELLA` para no pisar cambios ajenos.
+
+```sh
+tools/sumi-sddm config fonts                      # familias instaladas (~ = sólo en tu $HOME: el greeter no las ve)
+tools/sumi-sddm install --user                    # copia a ~/.local/share/sumi-sddm + lanzador ~/.local/bin/sumi-sddm
+tools/sumi-sddm uninstall --user                  # quita ambos; conserva ~/.config/sumi-sddm
+```
 
 ## Desarrollo
 

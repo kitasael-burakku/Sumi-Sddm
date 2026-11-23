@@ -40,7 +40,7 @@ tools/sumiconf/schema.py   strict()  ← CLI (y el helper de la Fase 5)
 ## 2. Claves nuevas
 
 `fontScale` (texto de notch, botones y nombres), `clockWeight`, `clockOffsetX`, `clockOffsetY`,
-`userNames`, `userInactiveOpacity`, `userStripMargin`. Total: 44 claves en 9 grupos, cada una con etiqueta
+`userNames`, `userInactiveOpacity`, `userStripMargin`. Total: 41 claves en 9 grupos, cada una con etiqueta
 y ayuda en inglés para la UI de Settings (`config schema --json`).
 
 ## 3. CLI
@@ -63,7 +63,7 @@ y ayuda en inglés para la UI de Settings (`config schema --json`).
 | `gen --check` | artefactos al día |
 | `qmllint --max-warnings 0`, archivo a archivo (21) | 0 avisos |
 | Python (`tests/py`, 30 casos): esquema, paridad, estricta, INI, escritura atómica, imágenes, CLI de extremo a extremo con XDG temporal, vista previa | 30/30 |
-| QML (51 casos: 44 Greeter + 7 configuración/paridad), software | 51/51 |
+| QML (42 casos del Greeter + 5 de configuración/paridad; qmltestrunner cuenta además initTestCase/cleanupTestCase de cada archivo: 51), software | 51/51 |
 | QML, OpenGL | 51/51 |
 | Greeter real, tema sin `theme.conf.user` | `custom=0`, sin avisos |
 | Greeter real con `valid.conf.user` | `custom=4` (lo esperado), sin avisos |

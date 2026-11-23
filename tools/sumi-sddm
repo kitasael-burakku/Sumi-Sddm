@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """sumi-sddm — configuración, vista previa y desarrollo de Sumi SDDM. Nada aquí usa privilegios.
 
+Contrato para otros programas (Settings de Sumi Shell): todas las órdenes aceptan --json; ver docs/CLI-JSON.md.
+  version [--json]                  versión, versión del contrato (api) y tipo de instalación
+
 Configuración del usuario (en ~/.config/sumi-sddm/; el tema instalado no se toca):
   config path                       ruta de theme.conf.user
   config schema [--json]            esquema completo (claves, tipos, rangos, etiquetas de UI)
@@ -11,7 +14,12 @@ Configuración del usuario (en ~/.config/sumi-sddm/; el tema instalado no se toc
   config validate [ARCHIVO] [--json]
   config reset                      guarda una copia (.prev) y vuelve a todos los defectos
   config restore                    recupera la copia .prev
+  config fonts [--json]             familias instaladas (las de tu $HOME no las verá el greeter)
   wallpaper set ARCHIVO | clear | info [--json]
+  Las escrituras admiten --expect HUELLA (la «stamp» de config show): si algo cambió, no se escribe.
+
+Instalación de usuario (sin privilegios; copia, no enlaza):
+  install --user | uninstall --user | install --status   ~/.local/share/sumi-sddm + ~/.local/bin/sumi-sddm
 
 Vista previa:
   preview [--out PNG] [--scenario S] [--size AxH] [--json]   captura offscreen con tu configuración
@@ -19,7 +27,7 @@ Vista previa:
 
 Desarrollo:
   gen [--check]                     regenera schema.js, theme.conf y docs/CONFIG.md desde el esquema
-  lint | test | render | smoke | check
+  lint | test | render | smoke | check   (sólo en el repositorio)
 """
 from __future__ import annotations
 
@@ -27,6 +35,7 @@ import argparse
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -38,7 +47,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from sumiconf import ConfigError, Schema, strict  # noqa: E402
 from sumiconf import gen as gen_mod  # noqa: E402
-from sumiconf import image, ini, paths  # noqa: E402
+from sumiconf import image, ini, paths, state  # noqa: E402
+from sumiconf import install as install_mod  # noqa: E402
 
 ROOT = paths.ROOT
 THEME = paths.THEME
@@ -59,18 +69,24 @@ HEADER = ("Sumi SDDM — configuración del usuario. Escrito por `sumi-sddm conf
 
 
 def emit(obj, as_json: bool, text: str = "") -> None:
+    """Respuesta correcta. En JSON siempre lleva `ok` y `api` (docs/CLI-JSON.md)."""
     if as_json:
-        print(json.dumps(obj, ensure_ascii=False, indent=1))
+        print(json.dumps({"ok": True, "api": state.API, **obj}, ensure_ascii=False, indent=1))
     elif text:
         print(text)
 
 
-def fail(msg: str, as_json: bool = False, code: int = 1) -> int:
+def fail(msg: str, as_json: bool = False, rc: int = 1, code: str = "invalid", **extra) -> int:
+    """Error. En JSON: {ok: false, api, code, error, …}; `code` es estable, `error` es texto para personas."""
     if as_json:
-        print(json.dumps({"ok": False, "error": msg}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "api": state.API, "code": code, "error": msg, **extra}, ensure_ascii=False))
     else:
         print(f"sumi-sddm: {msg}", file=sys.stderr)
-    return code
+    return rc
+
+
+def fail_exc(exc: ConfigError, as_json: bool) -> int:
+    return fail(str(exc), as_json, code=exc.code, **exc.extra)
 
 
 def qt_tool(name: str) -> str:
@@ -121,140 +137,184 @@ def check_background(schema: Schema, value: str) -> None:
     image.inspect(f)
 
 
-def cmd_config(args) -> int:
-    schema = Schema.load()
-    j = getattr(args, "json", False)
-    op = args.op
+def font_warning(schema: Schema, user: dict) -> list[dict]:
+    """Aviso si fontFamily no está instalada fuera de $HOME (el greeter no la verá y Qt usará otra)."""
+    fam = user.get("fontFamily", "")
+    if not fam:
+        return []
     try:
-        if op == "path":
-            print(paths.user_conf())
-            return 0
-        if op == "schema":
-            data = json.loads((ROOT / "schema" / "config-schema.json").read_text(encoding="utf-8"))
-            if j:
-                emit(data, True)
-            else:
-                for k in schema.order:
-                    e = schema.keys[k]
-                    print(f"{k:22} {e['type']:8} {gen_mod._range(e):40} defecto={e['default']!r}")
-            return 0
-        if op == "validate":
-            target = Path(args.file) if args.file else paths.user_conf()
-            vals = load_user(schema, target)
-            for k, v in vals.items():
-                if k == "background":
-                    check_background(schema, v)
-            emit({"ok": True, "path": str(target), "keys": len(vals)}, j, f"válido: {target} ({len(vals)} claves)")
-            return 0
+        known = {f["family"]: f["system"] for f in state.fonts(re.compile(schema.keys["fontFamily"]["pattern"]))}
+    except (ConfigError, OSError, subprocess.SubprocessError):
+        return []
+    if known.get(fam):
+        return []
+    why = "only installed in your home folder" if fam in known else "not installed"
+    return [{"key": "fontFamily", "message": f"“{fam}” is {why}: the login screen will use another font"}]
 
-        user = load_user(schema)
-        if op == "show":
-            out = {"ok": True, "version": schema.version, "path": str(paths.user_conf()), "values": {}}
+
+def cmd_version(args) -> int:
+    out = {"version": state.version(), "schema": Schema.load().version, "kind": state.kind()}
+    emit(out, args.json, f"sumi-sddm {out['version']} (api {state.API}, esquema {out['schema']}, {out['kind']})")
+    return 0
+
+
+def cmd_config(args) -> int:
+    j = getattr(args, "json", False)
+    try:
+        schema = Schema.load()
+        if args.op in ("set", "unset", "reset", "restore"):
+            with state.locked():
+                state.check_expect(args.expect)
+                text = config_write(schema, args)
+                emit({"stamp": state.stamp()}, j, text)
+            return 0
+        return config_read(schema, args, j)
+    except ConfigError as exc:
+        return fail_exc(exc, j)
+
+
+def config_read(schema: Schema, args, j: bool) -> int:
+    op = args.op
+    if op == "path":
+        emit({"path": str(paths.user_conf())}, j, str(paths.user_conf()))
+        return 0
+    if op == "schema":
+        data = json.loads((ROOT / "schema" / "config-schema.json").read_text(encoding="utf-8"))
+        data.pop("$comment", None)
+        if j:
+            emit(data, True)
+        else:
             for k in schema.order:
                 e = schema.keys[k]
-                out["values"][k] = {"value": user.get(k, e["default"]), "default": e["default"], "set": k in user}
-            if j:
-                emit(out, True)
-            else:
-                for k, v in out["values"].items():
-                    mark = "*" if v["set"] else " "
-                    print(f"{mark} {k:22} {v['value']!r}")
-            return 0
-        if op == "get":
-            e = schema.entry(args.key)
-            emit({"ok": True, "key": args.key, "value": user.get(args.key, e["default"])}, j,
-                 str(user.get(args.key, e["default"])))
-            return 0
-        if op == "set":
-            # Todo o nada: si una pareja falla, no se escribe ninguna.
-            new = dict(user)
-            errors = []
-            for item in args.pairs:
-                k, sep, v = item.partition("=")
-                k = k.strip()
-                if not sep:
-                    errors.append(f"«{item}»: se esperaba CLAVE=VALOR")
+                print(f"{k:22} {e['type']:8} {gen_mod._range(e):40} defecto={e['default']!r}")
+        return 0
+    if op == "fonts":
+        fams = state.fonts(re.compile(schema.keys["fontFamily"]["pattern"]), schema.keys["fontFamily"]["maxLength"])
+        if j:
+            emit({"families": fams}, True)
+        else:
+            for f in fams:
+                print(("  " if f["system"] else "~ ") + f["family"])
+            print("(~ = sólo en tu $HOME: el greeter no la verá)")
+        return 0
+    if op == "validate":
+        target = Path(args.file) if args.file else paths.user_conf()
+        vals = load_user(schema, target)
+        if "background" in vals:
+            check_background(schema, vals["background"])
+        emit({"path": str(target), "keys": len(vals)}, j, f"válido: {target} ({len(vals)} claves)")
+        return 0
+    with state.locked(exclusive=False):
+        user = load_user(schema)
+        stamp = state.stamp()
+    if op == "show":
+        values = {k: {"value": user.get(k, schema.keys[k]["default"]), "default": schema.keys[k]["default"],
+                      "set": k in user} for k in schema.order}
+        if j:
+            emit({"version": schema.version, "path": str(paths.user_conf()), "stamp": stamp, "values": values,
+                  "warnings": font_warning(schema, user)}, True)
+        else:
+            for k, v in values.items():
+                print(f"{'*' if v['set'] else ' '} {k:22} {v['value']!r}")
+            for w in font_warning(schema, user):
+                print(f"aviso: {w['message']}")
+        return 0
+    if op == "get":
+        e = schema.entry(args.key)
+        v = user.get(args.key, e["default"])
+        emit({"key": args.key, "value": v, "set": args.key in user}, j, str(v))
+        return 0
+    return fail(f"operación desconocida: {op}", j, 2, code="usage")
+
+
+def config_write(schema: Schema, args) -> str:
+    """Escrituras de `config` (con el bloqueo tomado y --expect comprobado). Devuelve el texto para personas."""
+    op = args.op
+    conf = paths.user_conf()
+    prev = conf.with_name(conf.name + ".prev")
+    if op == "reset":
+        if conf.exists() or conf.is_symlink():
+            ini.write_atomic(prev, ini.read_file(conf))
+            conf.unlink()
+        return "configuración restablecida (copia en theme.conf.user.prev)"
+    if op == "restore":
+        if not prev.exists():
+            raise ConfigError("no hay copia anterior (theme.conf.user.prev)", code="missing")
+        save_user(schema, load_user(schema, prev))
+        return "copia anterior restaurada"
+    user = load_user(schema)
+    new = dict(user)
+    if op == "unset":
+        for k in args.keys:
+            schema.entry(k)
+            new.pop(k, None)
+    else:  # set: todo o nada; si una pareja falla, no se escribe ninguna
+        errors = []
+        for item in args.pairs:
+            k, sep, v = item.partition("=")
+            k = k.strip()
+            if not sep:
+                errors.append(f"«{item}»: se esperaba CLAVE=VALOR")
+                continue
+            try:
+                e = schema.entry(k)
+                if v.strip() == "":
+                    new.pop(k, None)
                     continue
-                try:
-                    e = schema.entry(k)
-                    if v.strip() == "":
-                        new.pop(k, None)
-                        continue
-                    new[k] = strict(e, v)
-                    if k == "background":
-                        check_background(schema, new[k])
-                except ConfigError as exc:
-                    errors.append(str(exc))
-            if errors:
-                return fail("; ".join(errors), j)
-            save_user(schema, new)
-            emit({"ok": True, "set": sorted(new.keys())}, j, f"guardado en {paths.user_conf()}")
-            return 0
-        if op == "unset":
-            new = dict(user)
-            for k in args.keys:
-                schema.entry(k)
-                new.pop(k, None)
-            save_user(schema, new)
-            emit({"ok": True}, j, f"guardado en {paths.user_conf()}")
-            return 0
-        if op == "reset":
-            conf = paths.user_conf()
-            if conf.exists():
-                ini.write_atomic(conf.with_name(conf.name + ".prev"), ini.read_file(conf))
-                conf.unlink()
-            emit({"ok": True}, j, "configuración restablecida (copia en theme.conf.user.prev)")
-            return 0
-        if op == "restore":
-            prev = paths.user_conf().with_name(paths.user_conf().name + ".prev")
-            vals = load_user(schema, prev)
-            save_user(schema, vals)
-            emit({"ok": True, "keys": len(vals)}, j, "copia anterior restaurada")
-            return 0
-    except ConfigError as exc:
-        return fail(str(exc), j)
-    return fail(f"operación desconocida: {op}", j, 2)
+                new[k] = strict(e, v)
+                if k == "background":
+                    check_background(schema, new[k])
+            except ConfigError as exc:
+                errors.append(str(exc))
+        if errors:
+            raise ConfigError("; ".join(errors))
+    if new != user:
+        save_user(schema, new)
+    return f"guardado en {conf}"
 
 
 def cmd_wallpaper(args) -> int:
-    schema = Schema.load()
     j = getattr(args, "json", False)
     staged = paths.staged_backgrounds()
     try:
-        user = load_user(schema)
-        if args.op == "set":
-            dest, info = image.copy_validated(Path(args.file), staged, paths.WALLPAPER_STEM)
-            # Quitar copias anteriores con otra extensión (sólo las nuestras: user.<ext>).
-            for old in staged.glob(paths.WALLPAPER_STEM + ".*"):
-                if old != dest and old.is_file() and not old.is_symlink():
-                    old.unlink()
-            user["background"] = f"{paths.WALLPAPER_DIR}/{dest.name}"
-            save_user(schema, user)
-            emit({"ok": True, "background": user["background"], "width": info.width, "height": info.height,
-                  "kind": info.kind, "bytes": info.size}, j,
-                 f"wallpaper preparado: {dest} ({info.width}×{info.height} {info.kind})")
-            return 0
-        if args.op == "clear":
-            user.pop("background", None)
-            save_user(schema, user)
-            for old in staged.glob(paths.WALLPAPER_STEM + ".*"):
-                if old.is_file() and not old.is_symlink():
-                    old.unlink()
-            emit({"ok": True}, j, "wallpaper quitado: se usará el fondo generado")
-            return 0
+        schema = Schema.load()
         if args.op == "info":
-            bg = user.get("background", "")
-            out = {"ok": True, "background": bg}
-            if bg:
-                f = paths.config_dir() / bg if bg.startswith("backgrounds/") else Path(bg)
-                info = image.inspect(f)
-                out.update({"file": str(f), "width": info.width, "height": info.height, "kind": info.kind,
-                            "bytes": info.size})
+            with state.locked(exclusive=False):
+                bg = load_user(schema).get("background", "")
+                out = {"background": bg}
+                if bg:
+                    f = paths.config_dir() / bg if bg.startswith("backgrounds/") else Path(bg)
+                    info = image.inspect(f)
+                    out.update({"file": str(f), "width": info.width, "height": info.height, "kind": info.kind,
+                                "bytes": info.size})
             emit(out, j, json.dumps(out, ensure_ascii=False))
             return 0
+        with state.locked():
+            state.check_expect(args.expect)
+            user = load_user(schema)
+            if args.op == "set":
+                dest, info = image.copy_validated(Path(args.file), staged, paths.WALLPAPER_STEM)
+                # Quitar copias anteriores con otra extensión (sólo las nuestras: user.<ext>).
+                for old in staged.glob(paths.WALLPAPER_STEM + ".*"):
+                    if old != dest and old.is_file() and not old.is_symlink():
+                        old.unlink()
+                user["background"] = f"{paths.WALLPAPER_DIR}/{dest.name}"
+                save_user(schema, user)
+                emit({"background": user["background"], "width": info.width, "height": info.height,
+                      "kind": info.kind, "bytes": info.size, "stamp": state.stamp()}, j,
+                     f"wallpaper preparado: {dest} ({info.width}×{info.height} {info.kind})")
+                return 0
+            if args.op == "clear":
+                user.pop("background", None)
+                save_user(schema, user)
+                for old in staged.glob(paths.WALLPAPER_STEM + ".*"):
+                    if old.is_file() and not old.is_symlink():
+                        old.unlink()
+                emit({"stamp": state.stamp()}, j, "wallpaper quitado: se usará el fondo generado")
+                return 0
     except ConfigError as exc:
-        return fail(str(exc), j)
-    return fail("operación desconocida", j, 2)
+        return fail_exc(exc, j)
+    return fail("operación desconocida", j, 2, code="usage")
 
 
 # ── Copia preparada del tema (vista previa, prueba) ──────────────────────────────────────
@@ -307,21 +367,27 @@ def my_display_name() -> str:
 
 def cmd_preview(args) -> int:
     j = args.json
+    if not re.fullmatch(r"[1-9][0-9]{2,4}x[1-9][0-9]{2,4}", args.size):
+        return fail(f"tamaño inválido: {args.size} (AnchoxAlto)", j, 2, code="usage")
     try:
         schema = Schema.load()
-        target = stage_theme("preview", with_user=True)
-        vals = load_user(schema)
+        # Una vista previa a la vez (la copia preparada es compartida); la config se lee como una foto coherente.
+        with state.locked_file(paths.cache_dir() / ".lock-preview", timeout=60):
+            with state.locked(exclusive=False):
+                target = stage_theme("preview", with_user=True)
+                vals = load_user(schema)
+                stamp = state.stamp()
+            out = Path(args.out) if args.out else paths.cache_dir() / "preview" / f"{args.scenario}-{args.size}.png"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            if out.exists():
+                out.unlink()
+            ok, noise = render_one(qt_tool("qml"), target, args.scenario, args.size, out, args.backend,
+                                   raw_for_qml(schema, vals), my_display_name())
     except ConfigError as exc:
-        return fail(str(exc), j)
-    out = Path(args.out) if args.out else paths.cache_dir() / "preview" / f"{args.scenario}-{args.size}.png"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if out.exists():
-        out.unlink()
-    ok, noise = render_one(qt_tool("qml"), target, args.scenario, args.size, out, args.backend,
-                           raw_for_qml(schema, vals), my_display_name())
+        return fail_exc(exc, j)
     if not ok:
-        return fail("no se pudo generar la vista previa: " + " | ".join(noise[-5:]), j)
-    emit({"ok": True, "png": str(out), "scenario": args.scenario, "size": args.size}, j, str(out))
+        return fail("no se pudo generar la vista previa: " + " | ".join(noise[-5:]), j, code="render")
+    emit({"png": str(out), "scenario": args.scenario, "size": args.size, "stamp": stamp}, j, str(out))
     return 0
 
 
@@ -333,10 +399,50 @@ def cmd_try(args) -> int:
               "Repite con --yes para abrirla.")
         return 2
     try:
-        target = stage_theme("try", with_user=True)
+        with state.locked_file(paths.cache_dir() / ".lock-try", timeout=1):
+            with state.locked(exclusive=False):
+                target = stage_theme("try", with_user=True)
+            return subprocess.run([GREETER, "--test-mode", "--theme", str(target)]).returncode
     except ConfigError as exc:
-        return fail(str(exc))
-    return subprocess.run([GREETER, "--test-mode", "--theme", str(target)]).returncode
+        if exc.code == "busy":
+            return fail("ya hay una ventana de prueba abierta", code="busy")
+        return fail_exc(exc, False)
+
+
+def stamp_arg(v: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", v):
+        raise argparse.ArgumentTypeError("huella inválida (32 caracteres hexadecimales)")
+    return v
+
+
+def cmd_install(args) -> int:
+    if args.status:
+        st = install_mod.status()
+        emit(st, args.json, (f"instalado: {st['release']}" if st["installed"] else "no instalado")
+             + (f"\n{st['launcher']} existe y no es nuestro" if st["foreign"] else ""))
+        return 0
+    with state.locked_file(install_mod.data_dir() / ".lock", timeout=10):
+        out = install_mod.install(ROOT)
+    emit(out, args.json, f"instalado {out['version']} en {out['release']}\nlanzador: {out['launcher']}"
+         + (f"\nanterior conservada: {out['previous']}" if out["previous"] else ""))
+    return 0
+
+
+def cmd_uninstall(args) -> int:
+    lock = install_mod.data_dir() / ".lock"
+    with state.locked_file(lock, timeout=10):
+        out = install_mod.uninstall()
+    lock.unlink(missing_ok=True)
+    try:
+        install_mod.data_dir().rmdir()
+    except OSError:
+        pass
+    done = "\n".join(f"borrado: {r}" for r in out["removed"]) or "no estaba instalado"
+    emit(out, args.json, done + f"\n(la configuración en {out['kept']} se conserva)")
+    return 0
+
+
+DEV_COMMANDS = {"gen", "lint", "test", "render", "smoke", "check"}
 
 
 def cmd_gen(args) -> int:
@@ -487,10 +593,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="sumi-sddm", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    def writer(x):
+        x.add_argument("--json", action="store_true")
+        x.add_argument("--expect", metavar="HUELLA", type=stamp_arg,
+                       help="escribe sólo si la configuración sigue con esta huella (la «stamp» de config show)")
+
+    v = sub.add_parser("version")
+    v.add_argument("--json", action="store_true")
+    v.set_defaults(func=cmd_version)
+
     c = sub.add_parser("config")
     csub = c.add_subparsers(dest="op", required=True)
-    csub.add_parser("path")
-    for name in ("schema", "show"):
+    for name in ("path", "schema", "show", "fonts"):
         x = csub.add_parser(name)
         x.add_argument("--json", action="store_true")
     x = csub.add_parser("get")
@@ -498,27 +612,37 @@ def main() -> int:
     x.add_argument("--json", action="store_true")
     x = csub.add_parser("set")
     x.add_argument("pairs", nargs="+", metavar="CLAVE=VALOR")
-    x.add_argument("--json", action="store_true")
+    writer(x)
     x = csub.add_parser("unset")
     x.add_argument("keys", nargs="+")
-    x.add_argument("--json", action="store_true")
+    writer(x)
     x = csub.add_parser("validate")
     x.add_argument("file", nargs="?")
     x.add_argument("--json", action="store_true")
     for name in ("reset", "restore"):
-        x = csub.add_parser(name)
-        x.add_argument("--json", action="store_true")
+        writer(csub.add_parser(name))
     c.set_defaults(func=cmd_config)
 
     w = sub.add_parser("wallpaper")
     wsub = w.add_subparsers(dest="op", required=True)
     x = wsub.add_parser("set")
     x.add_argument("file")
+    writer(x)
+    writer(wsub.add_parser("clear"))
+    x = wsub.add_parser("info")
     x.add_argument("--json", action="store_true")
-    for name in ("clear", "info"):
-        x = wsub.add_parser(name)
-        x.add_argument("--json", action="store_true")
     w.set_defaults(func=cmd_wallpaper)
+
+    i = sub.add_parser("install")
+    mode = i.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--user", action="store_true", help="copia a ~/.local/share/sumi-sddm y lanzador en ~/.local/bin")
+    mode.add_argument("--status", action="store_true")
+    i.add_argument("--json", action="store_true")
+    i.set_defaults(func=cmd_install)
+    u = sub.add_parser("uninstall")
+    u.add_argument("--user", action="store_true", required=True)
+    u.add_argument("--json", action="store_true")
+    u.set_defaults(func=cmd_uninstall)
 
     p = sub.add_parser("preview")
     p.add_argument("--out")
@@ -558,9 +682,18 @@ def main() -> int:
     sub.add_parser("check").set_defaults(func=cmd_check)
 
     args = ap.parse_args()
+    j = getattr(args, "json", False)
+    if args.cmd in DEV_COMMANDS and state.kind() != "checkout":
+        return fail(f"«{args.cmd}» sólo está disponible en el repositorio de Sumi SDDM", j, 2, code="unsupported")
     if getattr(args, "size", None) == ["all"]:
         args.size = SIZES
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ConfigError as exc:
+        return fail_exc(exc, j)
+    except OSError as exc:
+        where = f"{exc.filename}: " if exc.filename else ""
+        return fail(f"{where}{exc.strerror or exc}", j, code="io")
 
 
 if __name__ == "__main__":
