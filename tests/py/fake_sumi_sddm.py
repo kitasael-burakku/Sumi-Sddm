@@ -17,8 +17,10 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import struct
 import sys
 import time
+import zlib
 from pathlib import Path
 
 D = Path(__file__).resolve().parent
@@ -41,11 +43,20 @@ SCHEMA = {
          "values": ["center", "top-left", "top-right", "bottom-left", "bottom-right"], "label": "Position"},
         {"key": "dateFormat", "group": "clock", "type": "string", "default": "dddd, d MMMM", "maxLength": 48,
          "pattern": "^[A-Za-z0-9 ,.:/'\\-]*$", "label": "Date format"},
-        {"key": "fontFamily", "group": "clock", "type": "string", "default": "Inter", "label": "Font"},
+        {"key": "fontFamily", "group": "clock", "type": "string", "default": "", "label": "Font"},
         {"key": "background", "group": "users", "type": "path", "default": "", "label": "Wallpaper"},
     ],
 }
 DEFAULTS = {k["key"]: k["default"] for k in SCHEMA["keys"]}
+
+
+def png(path: Path, w: int, h: int, rgb: tuple[int, int, int]) -> None:
+    """Un PNG válido de un color (sin dependencias): las Image de QML no deben quejarse."""
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    raw = b"".join(b"\0" + bytes(rgb) * w for _ in range(h))
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
 def stamp(values: dict) -> str:
@@ -151,17 +162,22 @@ def main() -> int:
         a = st.get("avatar")
         return reply({"iconFile": a, "exists": bool(a), "sddmUses": bool(a)} if a else {"exists": False})
     if args[:2] == ["avatar", "set"]:
-        save(lambda s: s.update(avatar="/var/lib/AccountsService/icons/me"))
-        return reply({"iconFile": "/var/lib/AccountsService/icons/me", "exists": True, "sddmUses": True})
+        icon = D / "icons" / "me"
+        icon.parent.mkdir(exist_ok=True)
+        png(icon, 8, 8, (200, 120, 40))
+        save(lambda s: s.update(avatar=str(icon)))
+        return reply({"iconFile": str(icon), "exists": True, "sddmUses": True})
     if args[:2] == ["avatar", "clear"]:
         save(lambda s: s.update(avatar=None))
         return reply({"exists": False})
 
     if args[0] == "preview":
-        png = D / "preview.png"
-        png.write_bytes(b"")
+        out = D / "preview.png"
+        size = args[args.index("--size") + 1] if "--size" in args else "1280x720"
+        w, h = (int(n) for n in size.split("x"))
+        png(out, max(1, w // 40), max(1, h // 40), (int(cur_stamp[:2], 16), 80, 160))
         sc = args[args.index("--scenario") + 1] if "--scenario" in args else "expanded"
-        return reply({"png": str(png), "scenario": sc, "stamp": cur_stamp})
+        return reply({"png": str(out), "scenario": sc, "stamp": cur_stamp, "size": size})
 
     if args[:2] == ["system", "status"]:
         return reply({"installed": True, "active": st.get("active", False), "activeTheme": "sumi" if

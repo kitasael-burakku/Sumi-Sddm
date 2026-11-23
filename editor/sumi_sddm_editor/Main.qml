@@ -5,10 +5,11 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 /**
- * La ventana del editor (fase 2: formulario; la vista previa y el sistema llegan en las fases 3 y 4).
+ * La ventana del editor (fases 2 y 3; el panel del sistema llega en la fase 4).
  *
- * Barra lateral con los grupos del esquema y búsqueda (por etiqueta o clave, en todos los grupos); a la derecha,
- * un Field por clave. Pie: el aviso o el error del backend, cuántas claves están personalizadas, «Restore
+ * Barra lateral con los grupos del esquema y búsqueda (por etiqueta o clave, en todos los grupos); en medio, un
+ * Field por clave (y el avatar, primera fila de Users); a la derecha, la vista previa, que se puede ocultar (sin
+ * ella no se genera ninguna). Pie: el aviso o el error del backend, cuántas claves están personalizadas, «Restore
  * previous» y «Reset all» (dos pulsaciones). Al volver el foco se relee (`recheck`): si algo cambió desde la
  * terminal o desde Settings, se avisa. Al cerrar con escrituras pendientes, se escriben antes de salir.
  */
@@ -35,15 +36,27 @@ ApplicationWindow {
         return g ? g.label : "";
     }
     property bool closeWhenIdle: false
+    property bool showPreview: true
+    readonly property bool showAvatar: win.query.length > 0 ? "avatar picture photo".indexOf(win.query) >= 0
+                                                            : win.group === "users"
 
-    width: 960
-    height: 680
+    width: 1280
+    height: 760
     minimumWidth: 640
     minimumHeight: 420
     visible: true
     title: "Login Screen (Sumi)"
 
     onActiveChanged: if (win.active) win.backend.recheck()
+    Component.onCompleted: {
+        // La vista previa, por defecto, al tamaño real de esta pantalla (el greeter dibuja en píxeles físicos).
+        const w = Math.round(Screen.width * Screen.devicePixelRatio), h = Math.round(Screen.height * Screen.devicePixelRatio);
+        if (w >= 100 && h >= 100) {
+            preview.screenSize = w + "x" + h;
+            win.backend.previewSize = preview.screenSize;
+        }
+    }
+    Binding { target: win.backend; property: "previewEnabled"; value: win.showPreview }
     onClosing: (close) => {
         if (win.backend.busy) {
             close.accepted = false;
@@ -168,13 +181,19 @@ ApplicationWindow {
 
                 Label {
                     objectName: "pageTitle"
-                    text: win.query.length > 0
-                        ? (win.shownKeys.length === 1 ? "1 result" : win.shownKeys.length + " results")
-                        : win.groupLabel
+                    readonly property int results: win.shownKeys.length + (win.showAvatar ? 1 : 0)
+                    text: win.query.length > 0 ? (results === 1 ? "1 result" : results + " results") : win.groupLabel
                     font.pointSize: Qt.application.font.pointSize * 1.4
                     font.weight: Font.DemiBold
                     Layout.margins: 20
                     Layout.bottomMargin: 8
+                }
+                AvatarRow {
+                    visible: win.showAvatar
+                    backend: win.backend
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 20
+                    Layout.rightMargin: 16
                 }
                 Repeater {
                     objectName: "fields"
@@ -189,13 +208,22 @@ ApplicationWindow {
                     }
                 }
                 Label {
-                    visible: win.query.length > 0 && win.shownKeys.length === 0
+                    visible: win.query.length > 0 && win.shownKeys.length === 0 && !win.showAvatar
                     text: "Nothing matches “" + search.text.trim() + "”"
                     color: palette.placeholderText
                     Layout.margins: 20
                 }
                 Item { Layout.preferredHeight: 16 }
             }
+        }
+
+        Preview {
+            id: preview
+            objectName: "preview"
+            backend: win.backend
+            visible: win.showPreview
+            Layout.fillHeight: true
+            Layout.preferredWidth: Math.max(320, Math.min(520, win.width * 0.36))
         }
     }
 
@@ -233,6 +261,11 @@ ApplicationWindow {
                 text: win.backend.customCount === 0 ? "All defaults"
                     : win.backend.customCount === 1 ? "1 customised" : win.backend.customCount + " customised"
                 color: palette.placeholderText
+            }
+            Button {
+                objectName: "togglePreview"
+                text: win.showPreview ? "Hide preview" : "Show preview"
+                onClicked: win.showPreview = !win.showPreview
             }
             Button {
                 objectName: "restore"

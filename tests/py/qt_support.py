@@ -9,7 +9,7 @@ import os
 import time
 
 try:
-    from PySide6.QtCore import QEventLoop
+    from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop
     from PySide6.QtGui import QGuiApplication
 except ImportError:          # pragma: no cover - depende del sistema
     QGuiApplication = None
@@ -36,3 +36,10 @@ def wait(cond, timeout: float = 10) -> bool:
         app().processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)
         time.sleep(0.002)
     return cond()
+
+
+def flush_deletes() -> None:
+    """Procesa ya los deleteLater pendientes (processEvents no los procesa fuera de un bucle exec)."""
+    for _ in range(3):
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app().processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 20)

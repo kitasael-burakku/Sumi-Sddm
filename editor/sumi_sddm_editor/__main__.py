@@ -26,12 +26,12 @@ def main(argv: list[str] | None = None) -> int:
     app.setDesktopFileName("sumi-sddm-editor")
 
     backend = Backend()
-    backend.previewEnabled = False          # fase 2: todavía no hay panel de vista previa
     engine = QQmlApplicationEngine()
     engine.setInitialProperties({"backend": backend})
     engine.load(QUrl.fromLocalFile(str(HERE / "Main.qml")))
     if not engine.rootObjects():
         return 1
+    app.aboutToQuit.connect(backend.shutdown)
     backend.load()
     return app.exec()
 

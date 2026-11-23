@@ -10,7 +10,10 @@ import QtQuick.Layouts
  *
  *   bool → Switch · enum → botones si hay ≤ 4 valores, si no ComboBox · integer/number → Slider + campo
  *   (`allowZero`: casilla «Off») · color → muestra + ColorDialog (con alfa) + campo hex · string → campo de texto
- *   · path (el fondo) → «Choose image…» (FileDialog → `wallpaper set`) y «Remove» (`wallpaper clear`)
+ *   · fontFamily → lista con búsqueda de `config fonts` (las familias sólo de tu $HOME se marcan: el greeter, que
+ *   corre como el usuario sddm, no las ve); sin la lista, campo de texto
+ *   · path (el fondo) → «Choose image…» (FileDialog → `wallpaper set`), soltar una imagen sobre la fila, y «Remove»
+ *   (`wallpaper clear`)
  *
  * Etiqueta, `help` (o el aviso de `config show` para esa clave), punto de «personalizado» y «Reset» (→ unset).
  * La CLI valida en serio; aquí sólo se evita enviar lo que a todas luces no vale (rango, hex, `pattern`) para dar
@@ -93,6 +96,7 @@ Item {
                 : root.type === "integer" || root.type === "number" ? numberC
                 : root.type === "color" ? colorC
                 : root.type === "path" ? pathC
+                : root.type === "string" && root.key === "fontFamily" && root.backend.fonts.length > 0 ? fontC
                 : root.type === "string" ? textC : null
         }
 
@@ -106,6 +110,22 @@ Item {
             ToolTip.text: "Default: " + (String(root.entry["default"]) || "empty")
             onClicked: { root.problem = ""; root.backend.unset(root.key); }
         }
+    }
+
+    DropArea {
+        id: drop
+        anchors.fill: parent
+        enabled: root.type === "path"
+        keys: ["text/uri-list"]
+        onDropped: (ev) => { if (ev.hasUrls && ev.urls.length > 0) root.backend.setWallpaper(ev.urls[0]); }
+    }
+    Rectangle {
+        anchors.fill: parent
+        visible: drop.containsDrag
+        color: "transparent"
+        border.width: 2
+        border.color: palette.highlight
+        radius: 4
     }
 
     // ---- controles -------------------------------------------------------------------------------------------------
@@ -304,8 +324,109 @@ Item {
     }
 
     Component {
+        id: fontC
+        Button {
+            id: fontButton
+            readonly property string family: String(root.value || "")
+            readonly property var found: root.backend.fonts.find(f => f.family === fontButton.family)
+            objectName: "fontButton"
+            implicitWidth: 220
+            text: fontButton.family.length > 0 ? fontButton.family : "Bundled Inter"
+            font.family: fontButton.family.length > 0 ? fontButton.family : Qt.application.font.family
+            Accessible.name: root.label + ": " + text
+            onClicked: { fontSearch.text = ""; fontPopup.open(); fontSearch.forceActiveFocus(); }
+
+            Popup {
+                id: fontPopup
+                objectName: "fontPopup"
+                y: fontButton.height + 4
+                x: fontButton.width - width
+                width: 320
+                height: 380
+                padding: 8
+                focus: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 6
+                    TextField {
+                        id: fontSearch
+                        objectName: "fontSearch"
+                        placeholderText: "Search " + root.backend.fonts.length + " fonts"
+                        Accessible.name: "Search fonts"
+                        Layout.fillWidth: true
+                        Keys.onDownPressed: { fontList.forceActiveFocus(); fontList.currentIndex = 0; }
+                        Keys.onReturnPressed: if (fontList.count > 0) fontList.pick(fontList.model[0])
+                    }
+                    FontMetrics { id: uiMetrics; font: Qt.application.font }
+                    ListView {
+                        id: fontList
+                        objectName: "fontList"
+                        readonly property string q: fontSearch.text.trim().toLowerCase()
+                        function pick(entry) {
+                            fontPopup.close();
+                            if (entry.family === "") {
+                                if (root.isSet) root.backend.unset(root.key);
+                            } else if (entry.family !== fontButton.family) {
+                                root.send(entry.family);
+                            }
+                        }
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        keyNavigationEnabled: true
+                        // la primera fila es el valor por defecto (Inter, incluida en el tema)
+                        model: [{ family: "", system: true }].concat(root.backend.fonts).filter(f =>
+                            fontList.q.length === 0 || (f.family === "" ? "bundled inter default" : f.family.toLowerCase())
+                                .indexOf(fontList.q) >= 0)
+                        ScrollBar.vertical: ScrollBar {}
+                        delegate: ItemDelegate {
+                            id: fd
+                            required property var modelData
+                            objectName: "font-" + (fd.modelData.family || "bundled")
+                            width: ListView.view.width
+                            highlighted: fd.modelData.family === fontButton.family
+                            Accessible.name: (fd.modelData.family || "Bundled Inter")
+                                + (fd.modelData.system ? "" : ", only in your home folder")
+                            contentItem: ColumnLayout {
+                                spacing: 0
+                                Label {
+                                    // cada familia en su letra, pero en la altura de una fila de la interfaz:
+                                    // las de métricas enormes se encogen hasta caber
+                                    text: fd.modelData.family || "Bundled Inter (default)"
+                                    font.family: fd.modelData.family || Qt.application.font.family
+                                    font.pointSize: Qt.application.font.pointSize
+                                    fontSizeMode: Text.Fit
+                                    minimumPointSize: 6
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                    clip: true
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: Math.ceil(uiMetrics.height * 1.25)
+                                }
+                                Label {
+                                    visible: !fd.modelData.system
+                                    text: "Only in your home folder · the login screen can't use it"
+                                    color: "#d9534f"
+                                    font.pointSize: Qt.application.font.pointSize * 0.8
+                                }
+                            }
+                            onClicked: fontList.pick(fd.modelData)
+                            Keys.onReturnPressed: fontList.pick(fd.modelData)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
         id: pathC
         RowLayout {
+            id: pathRow
+            /** Lo que pasa al elegir (diálogo) o soltar (arrastrar) una imagen. */
+            function choose(url) { root.backend.setWallpaper(url); }
+            objectName: "wallpaperRow"
             spacing: 8
             Label {
                 objectName: "pathValue"
@@ -333,7 +454,7 @@ Item {
                 title: "Choose a wallpaper"
                 nameFilters: ["Images (" + (root.entry.extensions || ["jpg", "jpeg", "png", "webp"])
                               .map(x => "*." + x).join(" ") + ")"]
-                onAccepted: root.backend.setWallpaper(selectedFile)
+                onAccepted: pathRow.choose(selectedFile)
             }
         }
     }

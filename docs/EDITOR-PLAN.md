@@ -2,8 +2,8 @@
 
 > Estado: **decisiones tomadas; fase 0 cerrada** (paquete 0.5.0-1 instalado y probado por el autor el 2026-11-23:
 > `/usr/bin/sumi-sddm` responde `kind: "system"`, el tema sigue activo y en sincronía; la copia de usuario se
-> quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). **Fase 2 hecha** (formulario; 18 pruebas de ventana),
-> pendiente de que el autor la pruebe en su escritorio. Fases 3–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). **Fase 2 hecha** (formulario). **Fase 3 hecha** (vista
+> previa, fuentes, avatar; 28 pruebas de ventana en total). Fases 4–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
 > sugerencias de clave.
 
 ## Por qué
@@ -158,6 +158,26 @@ de guardar, recarga que pisa lo pendiente, apply sin esperar, Try sin dos pulsac
   un selector.
 - «Try in a window» → `try --yes` tras un aviso claro: toma el teclado y se cierra con Esc / cerrando la
   ventana.
+
+**Cómo quedó (fase 3).** `Preview.qml` (columna derecha, se puede ocultar y entonces no se genera ninguna),
+`AvatarRow.qml` (primera fila de Users; también aparece al buscar «avatar»/«picture») y el selector de fuentes en
+`Field.qml`.
+
+- Tamaño por defecto: el de la pantalla en píxeles físicos (`Screen.width × devicePixelRatio`), marcado
+  «(this screen)»; escenas, las cuatro de Settings. Cada vista previa tarda ~1,4 s (OpenGL).
+- Fuentes: lista con búsqueda de `config fonts`, cada familia en su letra (las de métricas enormes se encogen
+  para caber); las que sólo están en `$HOME` llevan «Only in your home folder · the login screen can't use it»
+  y, si se eligen, `config show` añade su aviso junto al campo. Sin lista (sin fc-list), campo de texto.
+- Fondo y avatar: además del diálogo, se puede soltar una imagen sobre la fila (los dos van a `choose(url)`).
+- Fallo encontrado por las pruebas: otra foto de avatar se guarda con el mismo nombre y la respuesta de la CLI es
+  idéntica, así que la ventana seguía enseñando la anterior. El backend ahora emite el cambio siempre tras
+  `avatar set` (Settings no lo tenía: en QML cada objeto nuevo cuenta como cambio).
+- La salida de la aplicación (`aboutToQuit`) llama a `backend.shutdown()`: para temporizadores, vacía la cola y
+  termina los procesos de la cola (no los de `system`).
+- Criterio de salida probado con la CLI del repositorio: al cambiar «Base colour» a rojo y luego a verde, la
+  esquina del PNG de la vista previa pasa a ser roja y luego verde.
+- Ruido conocido: al abrir la lista de fuentes, Qt escribe en la terminal «Failed to compute left/right minimum
+  bearings» por algunas fuentes de mapa de bits (.pcf). No afecta a nada.
 
 ### Panel del sistema
 

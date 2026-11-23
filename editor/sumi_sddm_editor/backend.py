@@ -442,7 +442,10 @@ class Backend(QObject):
 
         def done(doc, _code):
             if self._ok(doc):
-                self._put("avatar", doc)
+                # Siempre «cambió»: AccountsService guarda la foto nueva con el mismo nombre, así que la respuesta
+                # puede ser idéntica a la anterior y, sin el aviso, la ventana seguiría enseñando la vieja.
+                self._avatar = doc
+                self.avatarChanged.emit()
                 self._put("notice", "Avatar saved")
                 self.schedulePreview()
             else:
@@ -505,6 +508,23 @@ class Backend(QObject):
         if self._pending:
             self._write_timer.stop()
             self._flush()
+
+    @Slot()
+    def shutdown(self) -> None:
+        """Al salir: nada más en marcha. Para los temporizadores, vacía la cola y termina los procesos de la cola.
+
+        Una operación de sistema en curso (pkexec) no se mata aquí: la ventana no deja cerrar mientras dure.
+        """
+        for t in (self._write_timer, self._preview_timer, self._apply_retry, self._disarm):
+            t.stop()
+        self._queue.clear()
+        for proc in self.findChildren(QProcess):
+            if proc.property("sumiSystem"):
+                continue
+            if proc.state() != QProcess.ProcessState.NotRunning:
+                proc.kill()
+                proc.waitForFinished(2000)
+        self._refresh_busy()
 
     @Slot()
     def dismiss(self) -> None:
@@ -624,7 +644,8 @@ class Backend(QObject):
     def _system_run(self, verb: str) -> None:
         self._clear_messages()
         self._put("systemBusy", verb)
-        self._run(["system", verb, "--json"], 0, lambda doc, code: self._system_done(verb, doc))
+        proc = self._run(["system", verb, "--json"], 0, lambda doc, code: self._system_done(verb, doc))
+        proc.setProperty("sumiSystem", True)
 
     def _system_done(self, verb: str, doc: dict | None) -> None:
         self._put("systemBusy", "")

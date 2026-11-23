@@ -438,6 +438,11 @@ class EditorBackendTest(unittest.TestCase):
         self.assertEqual(self.calls("avatar", "set")[0][2], os.path.expanduser("~/pic.png"))
         self.assertTrue(b.isSet("avatar"))
         self.assertEqual(b.notice, "Avatar saved")
+        changes = []
+        b.avatarChanged.connect(lambda: changes.append(1))
+        b.setAvatar("~/other.png")                   # mismo iconFile en la respuesta
+        self.idle(b)
+        self.assertEqual(len(changes), 1, "otra foto con el mismo nombre también es un cambio")
         b.unset("avatar")
         self.idle(b)
         self.assertFalse(b.isSet("avatar"))

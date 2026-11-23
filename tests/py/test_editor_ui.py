@@ -21,11 +21,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "editor"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from qt_support import QGuiApplication, app, spin, wait  # noqa: E402
+from qt_support import QGuiApplication, app, flush_deletes, spin, wait  # noqa: E402
 
 if QGuiApplication is not None:
-    from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QEvent, QMetaObject, Qt, QUrl, qInstallMessageHandler
-    from PySide6.QtGui import QColor, QKeyEvent
+    from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QEvent, QMetaObject, QObject, Qt, QUrl, qInstallMessageHandler
+    from PySide6.QtGui import QColor, QImage, QKeyEvent
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuick import QQuickItem
     from PySide6.QtQuickControls2 import QQuickStyle
@@ -51,21 +51,25 @@ class WindowCase(unittest.TestCase):
 
     def tearDown(self):
         warnings = self.qml_warnings()
-        if self.win is not None:
-            wait(lambda: not self.b.busy, 5)
-            self.win.setProperty("closeWhenIdle", False)
-            self.win.close()
+        # Desmontaje en orden y completo AHORA: nada de esta ventana debe destruirse durante la prueba siguiente.
         if self.engine is not None:
+            wait(lambda: self.quiet(), 5)
+            self.b.shutdown()
+            if self.win is not None:
+                self.win.setProperty("closeWhenIdle", False)
+                self.win.close()
             self.engine.deleteLater()
-        spin(0.05)
+            flush_deletes()
+            self.b.deleteLater()
+            flush_deletes()
         qInstallMessageHandler(self._old_handler)
         self._tmp.cleanup()
         self.assertEqual(warnings, [], "avisos de QML")
 
     def open(self, **kw) -> None:
         kw.setdefault("write_delay_ms", 40)
+        kw.setdefault("preview_delay_ms", 60)
         self.b = Backend(**kw)
-        self.b.previewEnabled = False
         self.engine = QQmlApplicationEngine()
         self.engine.setInitialProperties({"backend": self.b})
         self.engine.load(QUrl.fromLocalFile(str(MAIN)))
@@ -73,12 +77,16 @@ class WindowCase(unittest.TestCase):
         self.win = self.engine.rootObjects()[0]
         self.b.load()
 
+    def quiet(self) -> bool:
+        b = self.b
+        return not b.busy and b.systemBusy == "" and not b._preview_timer.isActive() and not b._apply_retry.isActive()
+
     def ready(self) -> None:
-        self.assertTrue(wait(lambda: self.b.ready and not self.b.busy), (self.b.status, self.b.statusDetail))
+        self.assertTrue(wait(lambda: self.b.ready and self.quiet()), (self.b.status, self.b.statusDetail))
         spin(0.05)
 
     def idle(self) -> None:
-        self.assertTrue(wait(lambda: not self.b.busy), "el backend no quedó quieto")
+        self.assertTrue(wait(self.quiet), "el backend no quedó quieto")
         spin(0.05)
 
     def qml_warnings(self) -> list[str]:
@@ -100,6 +108,23 @@ class WindowCase(unittest.TestCase):
             if it.objectName() == name:
                 return it
         self.fail(f"no hay ningún elemento «{name}»")
+
+    def obj(self, name: str):
+        """Un objeto no visual (p. ej. un Popup): hijo QObject de algún elemento visible del árbol visual."""
+        for it in self.items(self.win.contentItem()):
+            if not it.isVisible():                        # p. ej. campos de otro grupo, ya en deleteLater
+                continue
+            o = it.findChild(QObject, name, Qt.FindChildOption.FindDirectChildrenOnly)
+            if o is not None:
+                return o
+        self.fail(f"no hay ningún objeto «{name}»")
+
+    def texts(self, root) -> list[str]:
+        return [str(i.property("text")) for i in self.items(root) if i.isVisible() and i.property("text")]
+
+    @staticmethod
+    def loaded_image(img) -> bool:
+        return img.property("sourceSize").width() > 0 and img.property("progress") == 1.0
 
     def visible_items(self, prefix: str):
         return [it for it in self.items() if it.objectName().startswith(prefix) and it.isVisible()]
@@ -378,6 +403,163 @@ class EditorUiFakeTest(WindowCase):
         self.assertEqual(self.item("message").property("text"), "another sumi-sddm operation is running")
         self.assertTrue(self.control("blur", "off").property("checked"), "vuelve a lo guardado")
 
+    # ---- fase 3: vista previa, fuentes, avatar, fondo ---------------------------------------------------------------
+    def log(self, *prefix: str) -> list[list[str]]:
+        p = self.dir / "log.jsonl"
+        log = [json.loads(l) for l in p.read_text().splitlines()] if p.exists() else []
+        return [a for a in log if a[:len(prefix)] == list(prefix)]
+
+    def dialog(self, owner: str, path: str) -> None:
+        """Lo que pasa cuando la persona elige (FileDialog) o suelta un archivo sobre `owner`: su `choose(url)`.
+
+        Python no toca el FileDialog: PySide no convierte QQuickFileDialog* y findChild devuelve otro objeto.
+        """
+        QMetaObject.invokeMethod(self.item(owner), "choose", Q_ARG("QVariant", QUrl.fromLocalFile(path)))
+        spin(0.02)
+
+    def test_preview_shows_and_follows_changes(self):
+        self.loaded()
+        img = self.item("previewImage")
+        self.assertTrue(wait(lambda: self.loaded_image(img)))
+        first = img.property("source").toString()
+        self.assertTrue(first.endswith("?v=1"))
+        size = self.b.previewSize
+        self.assertEqual(self.log("preview")[0][:5], ["preview", "--scenario", "expanded", "--size", size])
+        self.type_in(self.control("accentColor", "hex"), "#ff0000")
+        self.idle()
+        self.assertNotEqual(img.property("source").toString(), first, "cada cambio guardado, otra vista previa")
+        self.assertEqual(self.b.previewStamp, self.b.stamp)
+        self.assertFalse(self.item("stale").isVisible())
+
+    def test_preview_scene_and_size(self):
+        self.loaded()
+        scene = self.item("scenario")
+        self.assertEqual(scene.property("currentText"), "Password")
+        self.key(scene, Qt.Key.Key_Down)
+        self.idle()
+        self.assertEqual(self.log("preview")[-1][:3], ["preview", "--scenario", "sessions"])
+        size = self.item("size")
+        self.assertIn("(this screen)", size.property("displayText"))
+        self.key(size, Qt.Key.Key_Down)
+        self.idle()
+        self.assertNotEqual(self.log("preview")[-1][4], size.property("model")[0])
+        self.assertEqual(self.log("preview")[-1][4], self.b.previewSize)
+        self.assertNotIn("(this screen)", size.property("displayText"))
+
+    def test_hidden_preview_makes_none(self):
+        self.loaded()
+        n = len(self.log("preview"))
+        self.click(self.item("togglePreview"))
+        self.assertFalse(self.item("preview").isVisible())
+        self.assertFalse(self.b.previewEnabled)
+        self.type_in(self.control("accentColor", "hex"), "#00ff00")
+        self.idle()
+        spin(0.15)
+        self.assertEqual(len(self.log("preview")), n)
+        self.click(self.item("togglePreview"))
+        self.idle()
+        self.assertEqual(len(self.log("preview")), n + 1, "al volver a enseñarla, se pone al día")
+
+    def test_try_in_a_window(self):
+        self.loaded()
+        btn = self.item("tryWindow")
+        self.click(btn)
+        self.assertEqual(btn.property("text"), "Press again to open")
+        spin(0.1)
+        self.assertEqual(self.log("try"), [])
+        self.click(btn)
+        self.assertTrue(wait(lambda: self.log("try")))
+        self.assertEqual(self.log("try")[0], ["try", "--yes"])
+        self.assertEqual(btn.property("text"), "Try in a window")
+
+    def test_font_picker(self):
+        self.state(None, warnings=[{"key": "fontFamily", "message": "Mine is only in your home folder"}],
+                   values={"fontFamily": "Mine"})
+        self.loaded()
+        self.show("clock")
+        btn = self.control("fontFamily", "fontButton")
+        self.assertEqual(btn.property("text"), "Mine")
+        self.assertEqual(self.control("fontFamily", "caption").property("text"), "Mine is only in your home folder")
+        self.click(btn)
+        popup = self.obj("fontPopup")
+        self.assertTrue(popup.property("opened") or wait(lambda: popup.property("opened"), 2))
+        names = lambda: [i.objectName() for i in self.items(self.win.contentItem()) if i.objectName().startswith("font-")
+                         and i.isVisible()]
+        self.assertEqual(names()[:3], ["font-bundled", "font-Inter", "font-Mine"])
+        self.assertIn("Only in your home folder · the login screen can't use it", self.texts(self.item("font-Mine")))
+        self.assertEqual(self.texts(self.item("font-Inter")), ["Inter"])
+        search = self.item("fontSearch")
+        search.setProperty("text", "int")              # «Bundled Inter» también es Inter
+        spin(0.05)
+        self.assertEqual(names(), ["font-bundled", "font-Inter"])
+        search.setProperty("text", "MIN")
+        spin(0.05)
+        self.assertEqual(names(), ["font-Mine"])
+        search.setProperty("text", "int")
+        spin(0.05)
+        self.click(self.item("font-Inter"))
+        self.idle()
+        self.assertEqual(self.sets(), [["fontFamily=Inter"]])
+        self.assertFalse(popup.property("opened"))
+        self.click(btn)
+        self.item("fontSearch").setProperty("text", "")
+        spin(0.05)
+        self.click(self.item("font-bundled"))
+        self.idle()
+        self.assertEqual(self.sets()[-1], ["fontFamily="])
+        self.assertEqual(btn.property("text"), "Bundled Inter")
+
+    def test_font_text_field_without_list(self):
+        self.loaded()
+        self.b._put("fonts", [])                    # fc-list no disponible
+        spin(0.05)
+        self.show("clock")
+        self.type_in(self.control("fontFamily", "text"), "Mine")
+        self.idle()
+        self.assertEqual(self.sets(), [["fontFamily=Mine"]])
+
+    def test_avatar_row(self):
+        self.loaded()
+        self.show("users")
+        row = self.item("field-avatar")
+        self.assertTrue(row.isVisible())
+        self.assertEqual(self.item("caption", row).property("text"),
+                         "Choose a picture · without one, your initials are shown")
+        self.assertFalse(self.item("removeAvatar", row).isVisible())
+        pic = str(self.dir / "my pic.png")
+        self.dialog("field-avatar", pic)
+        self.idle()
+        self.assertEqual(self.log("avatar", "set")[0][:3], ["avatar", "set", pic])
+        img = self.item("avatarImage", row)
+        self.assertTrue(wait(lambda: self.loaded_image(img)))
+        self.assertTrue(self.item("removeAvatar", row).isVisible())
+        self.assertEqual(self.item("message").property("text"), "Avatar saved")
+        # Otra foto: AccountsService la guarda con el mismo nombre; la URL debe cambiar o se vería la anterior.
+        first = img.property("source").toString()
+        self.dialog("field-avatar", str(self.dir / "other.png"))
+        self.idle()
+        self.assertEqual(QUrl(first).toLocalFile(), QUrl(img.property("source").toString()).toLocalFile())
+        self.assertNotEqual(img.property("source").toString(), first)
+        self.click(self.item("removeAvatar", row))
+        self.idle()
+        self.assertEqual(self.log("avatar", "clear")[0][:2], ["avatar", "clear"])
+        self.assertFalse(self.item("removeAvatar", row).isVisible())
+        self.show("colors")
+        self.assertFalse(row.isVisible())
+        self.item("search").setProperty("text", "pict")
+        spin(0.05)
+        self.assertTrue(row.isVisible())
+        self.assertEqual(self.item("pageTitle").property("text"), "1 result")
+
+    def test_wallpaper_dialog(self):
+        self.loaded()
+        self.show("users")
+        wall = str(self.dir / "wall paper.jpg")
+        self.dialog("wallpaperRow", wall)
+        self.idle()
+        self.assertEqual(self.log("wallpaper", "set")[0][:3], ["wallpaper", "set", wall])
+        self.assertEqual(self.control("background", "pathValue").property("text"), "user.png")
+
     def test_close_writes_pending_changes_first(self):
         self.loaded(write_delay_ms=5000)
         self.type_in(self.control("accentColor", "hex"), "#123456")
@@ -452,6 +634,27 @@ class EditorUiRealCliTest(WindowCase):
                                         "dateFormat": "d MMM"})
         self.assertEqual(self.control("dateFormat", "text").property("text"), "d MMM", "enseña lo guardado")
         self.no_warnings()
+
+    def test_preview_reflects_each_change(self):
+        """La vista previa real (qml offscreen) cambia con lo guardado: el color base se ve en la esquina."""
+        self.open(program=str(CLI), preview_timeout_ms=120_000)
+        self.b.previewSize = "640x360"
+        self.ready()
+
+        def corner() -> tuple[int, int, int]:
+            png = QUrl(self.b.previewUrl).toLocalFile()
+            c = QImage(png).pixelColor(3, 3)
+            return c.red(), c.green(), c.blue()
+
+        self.assertTrue(wait(lambda: self.b.previewUrl and not self.b.previewStale, 60), self.b.error)
+        for colour, channel in (("#ff0000", 0), ("#00ff00", 1)):
+            before = self.b.previewUrl
+            self.type_in(self.control("backgroundColor", "hex"), colour)
+            self.assertTrue(wait(lambda: self.b.previewUrl != before and not self.b.previewStale
+                                 and self.quiet(), 60), self.b.error)
+            rgb = corner()
+            self.assertEqual(max(range(3), key=lambda i: rgb[i]), channel, (colour, rgb))
+        self.assertEqual(self.saved(), {"backgroundColor": "#00ff00"})
 
 
 if __name__ == "__main__":
