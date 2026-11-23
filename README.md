@@ -4,8 +4,8 @@ Tema de inicio de sesión para SDDM (≥ 0.21, Qt 6): minimalista, con una notch
 autenticación. Compatible con Sumi Shell, pero **independiente**: no usa Quickshell, Hyprland ni ningún
 servicio de Sumi.
 
-> Estado: Fase 4 en curso: parte A hecha (contrato JSON, `install --user`); parte B (Settings de Sumi Shell)
-> preparada y probada, sin entregar. El tema **no está instalado ni activado** en el sistema.
+> Estado: Fase 4 hecha: contrato JSON, `install --user` y Settings → Login screen entregado en Sumi Shell.
+> El tema **no está instalado ni activado** en el sistema (Fase 5).
 
 ## Estructura
 

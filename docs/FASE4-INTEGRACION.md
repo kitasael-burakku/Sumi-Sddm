@@ -54,7 +54,7 @@ Cómo funciona `install --user` (A4):
   sesión sigue saliendo OpenGL. Hay una prueba nueva (48 en Python).
 - **Esquema:** la etiqueta de `backgroundFill` pasa de «Fit», que era también una de sus opciones, a «Scaling».
 
-## Parte B — Settings → Desktop tools → Login screen (2026-11-22), preparada y probada, sin entregar
+## Parte B — Settings → Desktop tools → Login screen (2026-11-22), entregada
 
 Fuentes en [`integration/sumi-shell/`](../integration/sumi-shell/README.md). El trabajo privado está en
 `~/Projects/Quickshell/.sddm-settings-20261122/`, ignorado por su propio `.gitignore`, así que el `.gitignore` del
@@ -113,3 +113,29 @@ Incluyen el trabajo sin commitear de la navegación de Settings, y la entrega va
 - **«Test window»** sólo se probó armada: abrirla toma el teclado.
 - **Vista previa del banco.** Usa el renderizador software, sin GPU. En tu sesión saldrá OpenGL, con blur.
 - **Commit en dotfiles.** Tras la entrega, el commit en dotfiles es tuyo (`dotbackup`), como siempre.
+
+### Entrega en la sesión (2026-11-22, autorizada)
+
+`deliver.py apply --apply`, con la sesión desbloqueada:
+- **Rutas.** Las 10 rutas, en fuente (dotfiles) y en vivo, partiendo de la base en las 20.
+- **Respaldo y vuelta atrás.** El respaldo está en
+  `~/.local/state/sumi-sddm-settings-20261122-hw3nt6qi/backup`. Para deshacer:
+
+  ```sh
+  python3 integration/sumi-shell/deliver.py rollback --bundle ~/.local/state/sumi-sddm-settings-20261122-hw3nt6qi/backup --apply
+  ```
+
+  Ya está comprobada en seco.
+
+| Comprobación | Resultado |
+|---|---|
+| Recarga en caliente (la del vigilante y la forzada) | 2 «Configuration Loaded», validada al primer intento, 0 avisos QML |
+| Unidad | mismo PID (1416), `NRestarts=0` |
+| `settings.json` | mismo SHA-256 antes y después |
+| Capacidad `login.sddmTheme` | `available`, versión 0.4.0 |
+| `deliver.py check` | las 20 rutas en `candidate` |
+| `~/.config/sumi-sddm` | sigue sin existir hasta el primer cambio desde Settings |
+
+Pendiente del autor:
+- **Mirar la página en la sesión.** No se abrió Settings.
+- **Commit en dotfiles** con `dotbackup`. Incluirá también tu trabajo de la navegación, que ya estaba sin commitear.
