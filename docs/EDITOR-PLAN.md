@@ -1,7 +1,9 @@
 # Plan: editor gráfico independiente (sin Sumi Shell)
 
-> Estado: **propuesta**, para cuando Sumi SDDM se publique. Nada de esto está empezado. Escrito el 2026-11-23,
-> después de añadir `sumi-sddm config edit` y las sugerencias de clave.
+> Estado: **decisiones tomadas; fase 0 cerrada** (paquete 0.5.0-1 instalado y probado por el autor el 2026-11-23:
+> `/usr/bin/sumi-sddm` responde `kind: "system"`, el tema sigue activo y en sincronía; la copia de usuario se
+> quitó con `uninstall --user`). Fases 1–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> sugerencias de clave.
 
 ## Por qué
 
@@ -28,9 +30,12 @@ tercera fuente de verdad**: es un cliente más del contrato JSON (`docs/CLI-JSON
    - ante un `conflict`, recarga y avisa;
    - las acciones con riesgo piden dos pulsaciones.
 
-## Decisiones que necesitan al autor
+## Decisiones
 
-| # | Decisión | Recomendación | Alternativas |
+Elegidas por el autor el 2026-11-23: **todas las recomendadas** (D1 PySide6 + QML, D2 paquete dividido, D3 inglés,
+D4 `sumi-sddm-editor` + `.desktop`, D5 mostrarlo siempre, también con Sumi Shell). La tabla queda como registro.
+
+| # | Decisión | Elegida | Alternativas descartadas |
 |---|---|---|---|
 | D1 | Tecnología | **PySide6 + QML**: el proyecto ya es Python, no hay compilación y el paquete sigue `arch=any` | C++/Qt (sin dependencia Python pesada, pero con compilación y `arch=x86_64`); QML puro con un plugin C++ propio para lanzar procesos |
 | D2 | Empaquetado | **Paquete dividido** (`pkgbase=sumi-sddm`): `sumi-sddm` (tema + helper + CLI) y `sumi-sddm-editor` (depende de `pyside6`) | Un solo paquete con `pyside6` en `optdepends` |
@@ -38,10 +43,17 @@ tercera fuente de verdad**: es un cliente más del contrato JSON (`docs/CLI-JSON
 | D4 | Nombre y lanzador | `sumi-sddm-editor` + `.desktop` «Login Screen (Sumi)» | Subcomando `sumi-sddm gui` |
 | D5 | ¿Apagado en Sumi Shell? | Si existe Settings, el `.desktop` puede llevar `NotShowIn=` o un aviso «también en Settings»; **sugiero no ocultarlo** | Ocultarlo cuando la capacidad `login.sddmTheme` esté presente |
 
-## Requisito previo: la CLI en el paquete (fase 0)
+## Requisito previo: la CLI en el paquete (fase 0) — hecha en 0.5.0
 
-Hoy el paquete instala el tema, el helper y una parte de `sumiconf`. **La CLI no**: se copia a mano con
-`install --user`. Un editor publicado no puede depender de eso.
+Hasta la 0.4.2 el paquete instalaba el tema, el helper y una parte de `sumiconf`. **La CLI no**: se copiaba a
+mano con `install --user`. Un editor publicado no puede depender de eso.
+
+Cómo quedó: la raíz de la CLI es `/usr/lib/sumi-sddm/` (la misma del helper); `theme/sumi` es un enlace relativo
+al tema instalado (`../../../share/sddm/themes/sumi`), así que no se duplica; `state.kind()` responde `"system"`
+cuando el helper está junto a la CLI. `preview`/`try` copian el tema **sin** `theme.conf.user` ni
+`backgrounds/` (los que deja el helper al aplicar), así la vista previa enseña sólo lo guardado por el usuario.
+`test_packaging.py` ejecuta el `package()` del PKGBUILD en un directorio temporal y prueba la CLI resultante
+(también corre en el `check()` del paquete). Settings no mira `kind`: el valor nuevo no le afecta.
 
 - Instalar `tools/sumi-sddm`, `tools/sumiconf/` completo, `tools/harness/` (para `preview`), el esquema y
   `docs/CONFIG.md` bajo `/usr/lib/sumi-sddm/`.

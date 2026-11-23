@@ -34,8 +34,14 @@ def version() -> str:
 
 
 def kind() -> str:
-    """«checkout» (repositorio de desarrollo) o «user» (copia instalada con `install --user`)."""
-    return "checkout" if (paths.ROOT / "tests").is_dir() else "user"
+    """«checkout» (repositorio), «system» (paquete, /usr/lib/sumi-sddm) o «user» (copia de `install --user`).
+
+    El paquete instala el helper junto a la CLI (`<raíz>/sumi-sddm-helper`); ni el repositorio (lo tiene en
+    `system/`) ni la copia de usuario lo llevan ahí. Los clientes deben tolerar valores nuevos.
+    """
+    if (paths.ROOT / "tests").is_dir():
+        return "checkout"
+    return "system" if (paths.ROOT / "sumi-sddm-helper").is_file() else "user"
 
 
 # ── Huella ──────────────────────────────────────────────────────────────────────────────

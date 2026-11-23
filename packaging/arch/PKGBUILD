@@ -1,11 +1,12 @@
 # Sumi SDDM — paquete local, construido desde este repositorio (sin descargas).
 #   cd packaging/arch && makepkg            # construir (sin root)
 #   sudo pacman -U sumi-sddm-*.pkg.tar.zst  # instalar: NO activa el tema (eso es `sumi-sddm system activate`)
+#   El paquete trae la CLI en /usr/bin/sumi-sddm; `install --user` sólo hace falta sin el paquete.
 pkgname=sumi-sddm
 # Literal (namcap analiza el PKGBUILD sin coreutils); tests/py/test_packaging.py exige que coincida con VERSION.
-pkgver=0.4.2
-pkgrel=3
-pkgdesc="Minimal SDDM login theme with a top notch, plus a polkit helper to apply its settings"
+pkgver=0.5.0
+pkgrel=1
+pkgdesc="Minimal SDDM login theme with a top notch, plus its command-line tool and a polkit helper to apply its settings"
 arch=('any')
 url="https://github.com/kitasael-burakku/Sumi-Sddm"
 # El proyecto es MIT (LICENSE); Inter va con la SIL OFL 1.1.
@@ -22,6 +23,7 @@ check() {
   python3 -B tools/sumi-sddm gen --check
   [ "$(tr -d '[:space:]' < VERSION)" = "$pkgver" ] || { echo "pkgver ≠ VERSION"; return 1; }
   python3 -B -m unittest discover -s tests/py -p 'test_helper.py'
+  python3 -B -m unittest discover -s tests/py -p 'test_packaging.py'
 }
 
 package() {
@@ -37,13 +39,27 @@ package() {
   install -Dm0755 "$src/system/sumi-sddm-helper" "$pkgdir/usr/lib/sumi-sddm/sumi-sddm-helper"
   install -Dm0644 "$src/VERSION" "$pkgdir/usr/lib/sumi-sddm/VERSION"
   install -Dm0644 "$src/schema/config-schema.json" "$pkgdir/usr/lib/sumi-sddm/schema/config-schema.json"
-  for f in __init__ schema ini image probe paths; do
-    install -Dm0644 "$src/tools/sumiconf/$f.py" "$pkgdir/usr/lib/sumi-sddm/tools/sumiconf/$f.py"
+  local f
+  for f in "$src"/tools/sumiconf/*.py; do
+    install -Dm0644 "$f" "$pkgdir/usr/lib/sumi-sddm/tools/sumiconf/${f##*/}"
   done
+
+  # La CLI sin privilegios (raíz /usr/lib/sumi-sddm: `version` responde kind "system" por el helper de al lado).
+  # Su vista previa usa el arnés y el tema instalado; theme/sumi es un enlace relativo a él.
+  install -Dm0755 "$src/tools/sumi-sddm" "$pkgdir/usr/lib/sumi-sddm/tools/sumi-sddm"
+  for f in "$src"/tools/harness/*.qml; do
+    install -Dm0644 "$f" "$pkgdir/usr/lib/sumi-sddm/tools/harness/${f##*/}"
+  done
+  install -Dm0644 "$src/docs/CONFIG.md" "$pkgdir/usr/lib/sumi-sddm/docs/CONFIG.md"
+  install -d "$pkgdir/usr/lib/sumi-sddm/theme"
+  ln -s ../../../share/sddm/themes/sumi "$pkgdir/usr/lib/sumi-sddm/theme/sumi"
+  install -Dm0755 "$src/packaging/arch/sumi-sddm.sh" "$pkgdir/usr/bin/sumi-sddm"
 
   install -Dm0644 "$src/system/org.sumi.sddm.helper.policy" \
     "$pkgdir/usr/share/polkit-1/actions/org.sumi.sddm.helper.policy"
   install -Dm0644 "$src/theme/sumi/assets/fonts/OFL.txt" "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
   install -Dm0644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm0644 "$src/docs/RECUPERACION.md" "$pkgdir/usr/share/doc/$pkgname/RECUPERACION.md"
+  install -Dm0644 "$src/docs/CONFIG.md" "$pkgdir/usr/share/doc/$pkgname/CONFIG.md"
+  install -Dm0644 "$src/docs/CLI-JSON.md" "$pkgdir/usr/share/doc/$pkgname/CLI-JSON.md"
 }

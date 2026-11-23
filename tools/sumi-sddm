@@ -507,7 +507,9 @@ def stage_theme(where: str, with_user: bool, user_conf_file: str | None = None) 
         assert target.resolve().is_relative_to(paths.cache_dir().resolve()), target
         shutil.rmtree(target)
     base.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(THEME, target, symlinks=False)
+    # Sin la configuración aplicada: en el paquete, theme/sumi apunta al tema instalado, donde el helper deja
+    # theme.conf.user y backgrounds/. La vista previa enseña sólo lo preparado por el usuario.
+    shutil.copytree(THEME, target, symlinks=False, ignore=shutil.ignore_patterns("theme.conf.user", "backgrounds"))
     if user_conf_file:
         shutil.copyfile(user_conf_file, target / "theme.conf.user")
     elif with_user:

@@ -39,14 +39,13 @@ mira [Otras distribuciones](#otras-distribuciones).
 git clone https://github.com/kitasael-burakku/Sumi-Sddm.git
 cd Sumi-Sddm
 
-# 1. Construir e instalar el paquete. Esto instala el tema, pero NO lo activa.
+# Construir e instalar el paquete: el tema, el helper y el comando `sumi-sddm`. NO activa el tema.
 cd packaging/arch && makepkg
 sudo pacman -U sumi-sddm-*.pkg.tar.zst
-cd ../..
-
-# 2. Instalar el comando `sumi-sddm` para tu usuario (en ~/.local/bin, sin root).
-tools/sumi-sddm install --user
 ```
+
+Sin el paquete (o para desarrollar), `tools/sumi-sddm install --user` instala sólo el comando en `~/.local/bin`,
+sin root; si va antes en tu `PATH`, gana a `/usr/bin/sumi-sddm`.
 
 ### Probarlo antes de activarlo
 
@@ -166,7 +165,7 @@ tools/sumi-sddm            CLI sin privilegios: config, wallpaper, avatar, previ
 tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas, bloqueo
 tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
 system/                    helper privilegiado (pkexec) y su acción de polkit
-packaging/arch/            PKGBUILD (tema + helper + acción); no activa nada
+packaging/arch/            PKGBUILD (tema + helper + acción + CLI en /usr/bin); no activa nada
 integration/sumi-shell/    página Login screen para los ajustes de Sumi Shell
 tests/                     pruebas Python y QML, y casos compartidos entre ambos
 docs/                      configuración, contrato JSON, recuperación e informes de cada fase del desarrollo

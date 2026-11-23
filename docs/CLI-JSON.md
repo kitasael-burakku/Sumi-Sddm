@@ -52,7 +52,7 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 
 | Orden | Respuesta `ok: true` (además de `ok` y `api`) |
 |---|---|
-| `version --json` | `version` (del proyecto, `VERSION`), `schema` (versión del esquema), `kind`: `"checkout"` o `"user"` |
+| `version --json` | `version` (del proyecto, `VERSION`), `schema` (versión del esquema), `kind`: `"checkout"`, `"user"` o `"system"` (el paquete, `/usr/bin/sumi-sddm`). Puede haber valores nuevos: no hacer un `switch` cerrado |
 | `config schema --json` | `version`, `section`, `groups: [{id, label, …}]`, `keys: [{key, group, type, default, label, help?, min?, max?, step?, values?, …}]` |
 | `config show --json` | `version`, `path`, `stamp`, `values: {clave: {value, default, set}}`, `warnings: [{key, message}]` (mensajes en inglés, para la UI) |
 | `config get CLAVE --json` | `key`, `value`, `set` |
@@ -87,7 +87,10 @@ interactivo (abre `$VISUAL`/`$EDITOR`). Un programa debe usar `config set|unset`
 
 ## Cómo encontrar la CLI
 
-`install --user` copia la CLI, el tema y el arnés a `$XDG_DATA_HOME/sumi-sddm/releases/<versión>-<marca>/` y
-deja el lanzador `~/.local/bin/sumi-sddm`, un script y no un enlace. Un cliente busca `sumi-sddm` en el
+Desde la 0.5.0 el paquete instala la CLI en `/usr/lib/sumi-sddm/` con el lanzador `/usr/bin/sumi-sddm`
+(`kind: "system"`). Sin el paquete, `install --user` copia la CLI, el tema y el arnés a
+`$XDG_DATA_HOME/sumi-sddm/releases/<versión>-<marca>/` y deja el lanzador `~/.local/bin/sumi-sddm`, un script y
+no un enlace. Si están las dos, gana la que vaya antes en el `PATH` (normalmente `~/.local/bin`, la copia de
+usuario: útil para desarrollar; `uninstall --user` vuelve a la del paquete). Un cliente busca `sumi-sddm` en el
 `PATH` y comprueba que `version --json` responda con `api == 1`. Si no la encuentra, la función no está
 disponible; nada más depende de ella.
