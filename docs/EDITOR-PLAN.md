@@ -4,7 +4,8 @@
 > `/usr/bin/sumi-sddm` responde `kind: "system"`, el tema sigue activo y en sincronía; la copia de usuario se
 > quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). **Fase 2 hecha** (formulario). **Fase 3 hecha** (vista
 > previa, fuentes, avatar). **Fase 4 escrita y probada con la CLI falsa** (38 pruebas de ventana en total);
-> falta la prueba real del autor (Apply / Use / Restore y cancelar la contraseña). Fase 5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> probada de verdad por el autor (Apply, Restore, Use, contraseña incorrecta y cancelada): **cerrada**. Fase 5
+> en curso. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
 > sugerencias de clave.
 
 ## Por qué
@@ -209,8 +210,9 @@ cambios de prueba aplicados; se volvió atrás con `sumi-sddm system rollback` +
 recuperó exactamente la huella de antes, `af29455d…`) y se igualó la configuración guardada con la restaurada.
 Segunda ronda (03:01): «Restore previous theme» y «Use as login screen» desde el editor, los dos bien (el segundo
 tras una contraseña incorrecta: polkit vuelve a preguntar y el editor no ve nada). Estado final: Sumi activo,
-lo aplicado = `af29455d…`, en sincronía. Falta sólo **cancelar** la contraseña (el registro no muestra ninguna
-petición cancelada: todas acabaron ejecutadas o en «contraseña incorrecta»).
+lo aplicado = `af29455d…`, en sincronía. Tercera ronda (03:03): dos contraseñas **canceladas**; el pie dijo «Authentication cancelled · nothing
+changed», el registro muestra las dos peticiones sin ejecución y ni `/etc/sddm.conf` ni lo aplicado cambiaron.
+**Fase 4 cerrada.**
 
 ## Fases
 
