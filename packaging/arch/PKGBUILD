@@ -7,7 +7,7 @@ pkgver=0.4.2
 pkgrel=3
 pkgdesc="Minimal SDDM login theme with a top notch, plus a polkit helper to apply its settings"
 arch=('any')
-url="https://github.com/kitasael-burakku/Sumi-Sddm-"
+url="https://github.com/kitasael-burakku/Sumi-Sddm"
 # El proyecto es MIT (LICENSE); Inter va con la SIL OFL 1.1.
 license=('MIT' 'OFL-1.1')
 depends=('sddm' 'qt6-declarative' 'python' 'polkit' 'util-linux' 'systemd')
