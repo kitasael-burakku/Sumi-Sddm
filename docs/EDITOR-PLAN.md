@@ -203,6 +203,12 @@ guardado no está aplicado (con un punto naranja en la barra lateral).
   `/usr/share/doc/sumi-sddm/` o, en el repositorio, `docs/RECUPERACION.md`).
 - En QML un `None` de Python llega como `undefined`, no `null`: las comprobaciones usan `!x`.
 
+**Prueba real (2026-11-23, parcial).** Desde el editor, el autor usó «Restore previous theme» (02:48:59,
+`deactivate`) y «Apply» (02:49:13): los dos pasaron por pkexec y funcionaron. Se quedó con `orbital` activo y los
+cambios de prueba aplicados; se volvió atrás con `sumi-sddm system rollback` + `system activate` (lo aplicado
+recuperó exactamente la huella de antes, `af29455d…`) y se igualó la configuración guardada con la restaurada.
+Faltan por probar desde el editor: «Use as login screen» y cancelar la contraseña.
+
 ## Fases
 
 | Fase | Contenido | Criterio de salida |
