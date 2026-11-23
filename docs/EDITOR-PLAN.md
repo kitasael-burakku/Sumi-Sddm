@@ -2,7 +2,7 @@
 
 > Estado: **decisiones tomadas; fase 0 cerrada** (paquete 0.5.0-1 instalado y probado por el autor el 2026-11-23:
 > `/usr/bin/sumi-sddm` responde `kind: "system"`, el tema sigue activo y en sincronía; la copia de usuario se
-> quitó con `uninstall --user`). Fases 1–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). Fases 2–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
 > sugerencias de clave.
 
 ## Por qué
@@ -102,6 +102,19 @@ Es una traducción de `integration/sumi-shell/services/SddmTheme.qml`, cambiando
   `deactivateSystem()`, `openTestWindow()`, `reload()`.
 - Al volver el foco a la ventana: `config show` y comparar `stamp`. Si alguien cambió algo desde la terminal o
   desde Settings, se recarga con un aviso discreto. No hace falta vigilar el archivo.
+
+**Cómo quedó (fase 1).** `editor/sumi_sddm_editor/backend.py`, sólo QtCore. Además de lo de Settings:
+
+- cada orden de la cola tiene tiempo límite (60 s; la vista previa 120 s) y, si vence, se mata y se informa
+  `sumi-sddm did not answer in time`; las de `system` no tienen, porque esperan a una persona;
+- `recheck()` (para el foco) avisa «Changed outside the editor · reloaded» sólo si la huella cambió por algo ajeno;
+- `previewEnabled` y `previewSize` (escribibles), y `scenarios`, `captionFor`, `enumLabel`, `step` para el formulario;
+- las rutas de `FileDialog` (`file:///…`) y `~/…` se convierten a ruta local antes de llamar a la CLI.
+
+Pruebas: `tests/py/test_editor_backend.py` con `tests/py/fake_sumi_sddm.py` (una CLI falsa que registra cada
+argv y se gobierna con un `state.json`). Se comprobó que detectan fallos rompiendo el backend a propósito (sin
+deduplicar, varios procesos a la vez, sin `--expect`, conflicto sin descartar lo pendiente, vista previa antes
+de guardar, recarga que pisa lo pendiente, apply sin esperar, Try sin dos pulsaciones). Sin PySide6 se saltan.
 
 ### Formulario (QML)
 
