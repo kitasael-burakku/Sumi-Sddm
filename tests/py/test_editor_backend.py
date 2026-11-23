@@ -298,6 +298,23 @@ class EditorBackendTest(unittest.TestCase):
         self.idle(b)
         self.assertEqual(len(self.calls("config", "show")) - before, 1)
 
+    def test_shutdown_stops_everything(self):
+        self.state(None, delay={"preview": 2})
+        b = self.loaded()
+        b.set("dim", 0.9)
+        b.schedulePreview()
+        b.reload()
+        self.wait(lambda: b._running is not None)
+        b.shutdown()
+        self.assertFalse(b.busy)
+        self.assertEqual([p for p in b.findChildren(QProcess)
+                          if p.state() != QProcess.ProcessState.NotRunning], [])
+        before = len(self.log())
+        b.reload()
+        b.schedulePreview()
+        self.spin(0.3)
+        self.assertEqual(len(self.log()), before, "después de shutdown no se lanza nada")
+
     def test_one_process_at_a_time(self):
         self.state(None, delay={"show": 0.15, "status": 0.15, "info": 0.15, "fonts": 0.15, "preview": 0.15})
         b = self.make()

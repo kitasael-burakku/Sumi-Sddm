@@ -33,7 +33,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     app.aboutToQuit.connect(backend.shutdown)
     backend.load()
-    return app.exec()
+    code = app.exec()
+    # La ventana antes que el backend: al revés, sus enlaces se reevalúan con `backend` ya nulo y QML avisa
+    # («Cannot read property … of null»). Python no garantiza en qué orden suelta las variables locales.
+    del engine
+    del backend
+    return code
 
 
 if __name__ == "__main__":

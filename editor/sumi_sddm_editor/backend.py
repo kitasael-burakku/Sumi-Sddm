@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+import shiboken6
 from PySide6.QtCore import Property, QObject, QProcess, QTimer, QUrl, Signal, Slot
 
 API = 1
@@ -182,6 +183,7 @@ class Backend(QObject):
         self._running: Job | None = None
         self._pending: dict[str, dict] = {}      # clave → {value, raw}; raw "" = quitar
         self._last_stderr = ""
+        self._closing = False                    # tras shutdown(): la cola no arranca nada más
 
         self._write_timer = self._timer(write_delay_ms, self._flush)
         self._preview_timer = self._timer(preview_delay_ms, self._preview)
@@ -279,6 +281,8 @@ class Backend(QObject):
             if state["done"]:
                 return
             state["done"] = True
+            if not shiboken6.isValid(proc):     # terminó mientras se destruía todo (al salir): nada que hacer
+                return
             if watchdog is not None:
                 watchdog.stop()
             out = bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
@@ -322,6 +326,8 @@ class Backend(QObject):
         self._pump()
 
     def _pump(self) -> None:
+        if self._closing:
+            self._queue.clear()
         if self._running is not None or not self._queue:
             self._refresh_busy()
             return
@@ -353,6 +359,7 @@ class Backend(QObject):
     @Slot()
     def load(self) -> None:
         """versión → esquema → valores (y después fuentes, sistema, avatar y vista previa)."""
+        self._closing = False
         self._exe = self._program or shutil.which(PROGRAM) or ""
         if not self._exe:
             self._put("statusDetail", "")
@@ -555,6 +562,7 @@ class Backend(QObject):
 
         Una operación de sistema en curso (pkexec) no se mata aquí: la ventana no deja cerrar mientras dure.
         """
+        self._closing = True
         for t in (self._write_timer, self._preview_timer, self._apply_retry, self._disarm):
             t.stop()
         self._queue.clear()
