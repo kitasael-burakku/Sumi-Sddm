@@ -26,6 +26,10 @@ FocusScope {
     signal typed(string text)
 
     activeFocusOnTab: true
+    // El selector es una lista; cada ficha es un botón de opción con su nombre (← → para cambiar).
+    Accessible.role: Accessible.List
+    Accessible.name: "Users"
+    Accessible.description: "Use the left and right arrow keys to choose a user"
     implicitHeight: row.implicitHeight
     implicitWidth: row.implicitWidth
 

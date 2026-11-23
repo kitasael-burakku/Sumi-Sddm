@@ -93,11 +93,18 @@ FocusScope {
             event.accepted = true;
         }
 
+        // Con passwordEdit, Qt devuelve siempre un nombre vacío (para no filtrar nada): la etiqueta del campo de
+        // contraseña llega por la descripción y por la relación «labelled by» con su texto de marcador.
         Accessible.role: Accessible.EditableText
         Accessible.name: root.placeholder
+        Accessible.description: root.placeholder
         Accessible.passwordEdit: root.secret
+        Accessible.labelledBy: hint
 
         Text {
+            id: hint
+            Accessible.role: Accessible.StaticText
+            Accessible.name: root.placeholder
             anchors.fill: parent
             verticalAlignment: Text.AlignVCenter
             visible: field.text.length === 0 && field.preeditText.length === 0

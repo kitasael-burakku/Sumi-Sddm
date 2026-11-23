@@ -74,6 +74,7 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 | `install --user --json` | `version`, `release`, `launcher`, `previous`, `removed` |
 | `uninstall --user --json` | `removed`, `kept` (la configuración, que no se borra) |
 
+| `system log [--boot N] --json` | `boot`, `greeters: [{pid, time, theme, sumi, ok, ready, problems}]` (sólo los del usuario `sddm`), `sumiOk`, `logins: {succeeded, failed}`, `informationMessages`, `requests` (peticiones del greeter al daemon: Login, Reboot…), `sessions`, `expectCustom`. Sin nombres de usuario. Código de salida 1 si un greeter de Sumi tuvo problemas |
 | `system status --json` | `installed`, `version`, `activeTheme`, `decidedBy` (archivo que lo decide), `active`, `applied` ({archivo: sha256}), `inSync` (lo aplicado coincide con lo guardado), `stamp`, `previousTheme`, `lastChange` |
 | `system apply --json` | `changed`, `probe`, `applied`, `backup` (si cambió), `stamp` (de lo enviado) |
 | `system reset \| rollback \| activate \| deactivate [TEMA] \| probe --json` | `changed`, `backup`, y `activeTheme`/`previousTheme`/`probe`/`restored` según el verbo |

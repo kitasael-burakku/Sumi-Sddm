@@ -25,6 +25,7 @@ Sistema (Fase 5; cada orden que cambia algo pide la contraseña con pkexec):
   system reset | rollback | probe
   system activate                   Sumi será la pantalla de inicio la PRÓXIMA vez (no reinicia SDDM)
   system deactivate [TEMA]          vuelve al tema anterior
+  system log [--boot N]             qué pasó en la pantalla de inicio de un arranque (journal, sin root)
 
 Instalación de usuario (sin privilegios; copia, no enlaza):
   install --user | uninstall --user | install --status   ~/.local/share/sumi-sddm + ~/.local/bin/sumi-sddm
@@ -56,7 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from sumiconf import ConfigError, Schema, strict  # noqa: E402
 from sumiconf import gen as gen_mod  # noqa: E402
-from sumiconf import image, ini, paths, state  # noqa: E402
+from sumiconf import image, ini, paths, probe, state  # noqa: E402
 from sumiconf import install as install_mod  # noqa: E402
 
 ROOT = paths.ROOT
@@ -569,8 +570,43 @@ def run_helper(argv: list[str], data: bytes | None = None, timeout: int = 600) -
     return doc, p.returncode, p.stderr.decode("utf-8", "replace").strip()
 
 
+def cmd_system_log(args) -> int:
+    """Lo que pasó en la pantalla de inicio de un arranque (journal, sin root)."""
+    from sumiconf import greeterlog
+    j = args.json
+    schema = Schema.load()
+    conf = Path("/usr/share/sddm/themes/sumi/theme.conf.user")
+    try:
+        raw = ini.parse(conf.read_text(encoding="utf-8")) if conf.is_file() else {}
+        expect = probe.expected_custom(schema, raw)
+    except (OSError, ConfigError):
+        expect = None
+    entries = greeterlog.read_journal(args.boot)
+    if not entries:
+        return fail(f"el journal no tiene registros del greeter en el arranque {args.boot}", j, code="missing")
+    s = greeterlog.summarize(entries, expect)
+    s["boot"] = args.boot
+    lines = []
+    for g in s["greeters"]:
+        when = time.strftime("%H:%M:%S", time.localtime(g["time"]))
+        if not g["sumi"]:
+            lines.append(f"{when} greeter con otro tema: {g['theme'] or '?'}")
+            continue
+        lines.append(f"{when} Sumi: {'OK' if g['ok'] else 'PROBLEMAS'} · {g['ready'] or 'sin ready'}")
+        lines += ["   ! " + pr for pr in g["problems"]]
+    lines.append(f"inicios de sesión: {s['logins']['succeeded']} correctos, {s['logins']['failed']} fallidos"
+                 + (f" · sesión: {', '.join(s['sessions'])}" if s["sessions"] else ""))
+    asked = {k: v for k, v in s["requests"].items() if k not in ("Connect", "Login")}
+    if asked:
+        lines.append("otras peticiones del greeter: " + ", ".join(f"{k}×{v}" for k, v in sorted(asked.items())))
+    emit(s, j, "\n".join(lines))
+    return 0 if s["sumiOk"] or not any(g["sumi"] for g in s["greeters"]) else 1
+
+
 def cmd_system(args) -> int:
     j = args.json
+    if args.op == "log":
+        return cmd_system_log(args)
     helper, pkexec = helper_paths()
     if not os.path.exists(helper):
         return fail("Sumi SDDM no está instalado en el sistema (paquete sumi-sddm; ver packaging/arch)", j,
@@ -743,7 +779,17 @@ def cmd_smoke(args) -> int:
         except ConfigError as exc:
             return fail(str(exc))
         since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 1))
-        proc = subprocess.Popen([GREETER, "--test-mode", "--theme", str(target)], env=offscreen_env(backend),
+        env = offscreen_env(backend)
+        if args.screens > 1:
+            # Varias pantallas offscreen (archivo de configuración de la plataforma): una vista por pantalla.
+            screens = [{"name": f"OFF-{i + 1}", "x": 1920 * i, "y": 0, "width": 1920 if i == 0 else 1280,
+                        "height": 1080 if i == 0 else 1024, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}
+                       for i in range(args.screens)]
+            cfg = paths.cache_dir() / "smoke" / "screens.json"
+            cfg.write_text(json.dumps({"synthesizeToplevelWindows": True, "windowFrameMargins": False,
+                                       "screens": screens}))
+            env["QT_QPA_PLATFORM"] = f"offscreen:configfile={cfg}"
+        proc = subprocess.Popen([GREETER, "--test-mode", "--theme", str(target)], env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         time.sleep(args.seconds)
         proc.terminate()
@@ -766,6 +812,11 @@ def cmd_smoke(args) -> int:
                     and not l.startswith(("Loading file://", "Loading theme configuration"))]
         ready = [l for l in lines if "sumi-sddm: ready" in l]
         ok = bool(ready) and not problems
+        if ok and args.screens > 1:
+            primaries = sum("primary=true" in l for l in ready)
+            if len(ready) != args.screens or primaries != 1:
+                problems.append(f"{args.screens} pantallas: {len(ready)} ready, {primaries} principales (se espera 1)")
+                ok = False
         if ok and args.expect_custom is not None and f"custom={args.expect_custom}" not in ready[0]:
             problems.append(f"se esperaba custom={args.expect_custom}: {ready[0]}")
             ok = False
@@ -786,7 +837,7 @@ def cmd_check(args) -> int:
     rc = cmd_gen(argparse.Namespace(check=True))
     rc |= cmd_lint(args)
     rc |= cmd_test(argparse.Namespace(backend=None))
-    base = dict(backend=None, user_conf=None, with_user_config=False, seconds=5, verbose=False)
+    base = dict(backend=None, user_conf=None, with_user_config=False, seconds=5, verbose=False, screens=1)
     rc |= cmd_smoke(argparse.Namespace(**base, expect_custom=0))
     # Lectura real de QSettings frente a la nuestra: el greeter debe ver exactamente estas claves cambiadas.
     fixtures = ROOT / "tests" / "fixtures"
@@ -794,6 +845,8 @@ def cmd_check(args) -> int:
                                        expect_custom=4))
     rc |= cmd_smoke(argparse.Namespace(**dict(base, backend=["opengl"], user_conf=str(fixtures / "garbage.conf.user")),
                                        expect_custom=3))
+    # Varios monitores con el greeter real: una vista por pantalla y una sola principal.
+    rc |= cmd_smoke(argparse.Namespace(**dict(base, backend=["software"], screens=2), expect_custom=0))
     print(f"check: {'OK' if rc == 0 else 'FALLO'}")
     return rc
 
@@ -857,6 +910,9 @@ def main() -> int:
     for name in ("status", "probe", "apply", "reset", "rollback", "activate"):
         x = sysub.add_parser(name)
         x.add_argument("--json", action="store_true")
+    x = sysub.add_parser("log", help="qué pasó en la pantalla de inicio (journal, sin root)")
+    x.add_argument("--boot", type=int, default=0, help="0 = este arranque, -1 = el anterior…")
+    x.add_argument("--json", action="store_true")
     x = sysub.add_parser("deactivate")
     x.add_argument("theme", nargs="?", help="tema instalado al que volver (por defecto, el de antes)")
     x.add_argument("--json", action="store_true")
@@ -907,6 +963,7 @@ def main() -> int:
     s.add_argument("--with-user-config", action="store_true", help="usar ~/.config/sumi-sddm")
     s.add_argument("--expect-custom", type=int, help="nº de claves distintas del defecto que debe leer el greeter")
     s.add_argument("--seconds", type=float, default=5)
+    s.add_argument("--screens", type=int, default=1, help="pantallas offscreen simuladas (una vista por pantalla)")
     s.add_argument("-v", "--verbose", action="store_true")
     s.set_defaults(func=cmd_smoke)
     sub.add_parser("check").set_defaults(func=cmd_check)

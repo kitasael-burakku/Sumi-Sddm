@@ -172,6 +172,65 @@ TestCase {
         verify(find(g, "userStrip").activeFocus, "Tab → user strip");
     }
 
+    function test_tab_cycles_and_shift_tab_reverses() {
+        make();
+        g.expand();
+        tryVerify(() => pw().input.activeFocus);
+        for (let i = 0; i < 5; i++)
+            keyClick(Qt.Key_Tab);
+        verify(pw().input.activeFocus, "tras los usuarios, Tab vuelve a la contraseña");
+        keyClick(Qt.Key_Tab, Qt.ShiftModifier);
+        verify(find(g, "userStrip").activeFocus, "Mayús+Tab → usuarios");
+        keyClick(Qt.Key_Tab, Qt.ShiftModifier);
+        verify(find(g, "poweroffButton").activeFocus, "Mayús+Tab → apagar");
+    }
+
+    // ── Accesibilidad (Fase 6): todo lo que toma foco con Tab tiene rol y nombre ────────
+    function a11yProblems(state) {
+        const bad = [];
+        const walk = item => {
+            if (!item || !item.visible)
+                return;
+            const focusable = item.activeFocusOnTab === true || item instanceof TextInput;
+            if (focusable && item.enabled !== false) {
+                const acc = item.Accessible;
+                const name = acc ? String(acc.name || "") : "";
+                // un campo de contraseña no puede tener nombre en Qt 6.12: vale su descripción o «labelled by»
+                const labelled = acc && acc.passwordEdit && (String(acc.description || "") !== "" || !!acc.labelledBy);
+                if (!acc || acc.role === 0 || (name.trim() === "" && !labelled)) {
+                    let where = item.objectName || item.toString();
+                    for (let q = item.parent; q && q !== g; q = q.parent)
+                        if (q.objectName)
+                            where = q.objectName + "/" + where;
+                    bad.push(state + ":" + where + " role=" + (acc ? acc.role : "-") + " name=" + JSON.stringify(name));
+                }
+            }
+            for (const c of item.children || [])
+                walk(c);
+        };
+        walk(g);
+        return bad;
+    }
+    function test_accessible_names_in_every_state() {
+        let bad = [];
+        make();
+        bad = bad.concat(a11yProblems("compact"));
+        g.expand();
+        tryVerify(() => pw().input.activeFocus);
+        bad = bad.concat(a11yProblems("expanded"));
+        g.openSessions();
+        tryCompare(g, "notchMode", "sessions");
+        bad = bad.concat(a11yProblems("sessions"));
+        keyClick(Qt.Key_Escape);
+        g.requestPower("reboot");
+        tryCompare(g, "notchMode", "confirm");
+        bad = bad.concat(a11yProblems("confirm"));
+        make({ users: 0 });
+        g.expand();
+        bad = bad.concat(a11yProblems("manual"));
+        compare(bad.join("\n"), "", "controles sin rol o sin nombre accesible");
+    }
+
     // ── Autenticación ───────────────────────────────────────────────────────────────────
     function test_enter_submits_once_with_selected_session() {
         make();
