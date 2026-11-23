@@ -161,7 +161,7 @@ Con el diálogo de polkit de la shell:
   - **Versión.** Sube a **0.4.1**: el tema instalado (0.4.0) aún no lleva el arreglo y hay que reinstalar el
     paquete.
 
-## Parte C — Settings → Login screen: aplicar, usar, restaurar y avatar (preparada, sin entregar)
+## Parte C — Settings → Login screen: aplicar, usar, restaurar y avatar (entregada)
 
 Pedida por el autor el 2026-11-22. Fuentes en `integration/sumi-shell/`. Trabajo privado en
 `~/Projects/Quickshell/.sddm-settings-c-20261122/`.
@@ -205,3 +205,26 @@ Pedida por el autor el 2026-11-22. Fuentes en `integration/sumi-shell/`. Trabajo
 - **Miniatura del avatar.** En el banco no se ve, porque `PathField` usa MultiEffect y el banco usa el
   renderizador software. En la sesión sí se dibuja, como la del Lock.
 - **Contraseña.** El diálogo real de polkit desde Settings sólo se verá en la sesión: en el banco, pkexec es falso.
+
+### Entrega y avatar (2026-11-22, autorizados)
+
+- **`deliver.py --work … apply --apply`**, con la sesión desbloqueada:
+  - 3 rutas en fuente y vivo, de base a candidato, en las 6 entradas;
+  - recarga validada al primer intento: 2 «Configuration Loaded» y 0 avisos en el registro de la recarga;
+  - mismo PID (1416), `NRestarts=0` y `settings.json` con el mismo SHA-256;
+  - los avisos `qt.qpa.wayland.textinput` del journal son de las 21:00 y 21:04, anteriores a la entrega (21:06):
+    son de Qt al escribir en un campo.
+- **Respaldo y vuelta atrás.** El respaldo está en
+  `~/.local/state/sumi-sddm-sddm-settings-c-20261122-xabuso1o/backup`. Para deshacer:
+
+  ```sh
+  python3 integration/sumi-shell/deliver.py --work ~/Projects/Quickshell/.sddm-settings-c-20261122 rollback --bundle <respaldo> --apply
+  ```
+
+- **Avatar.** `sumi-sddm avatar set ~/Downloads/keiko.png`, la imagen que ya usa el Lock de Sumi Shell (PNG
+  1254×1254):
+  - AccountsService guarda `/var/lib/AccountsService/icons/kitasa-elburakku` (PNG 512×512, `root 0644`), legible
+    por `sddm`; `sddmUses` apunta a ese archivo;
+  - la vista previa lo enseña recortado en círculo.
+- **Pendiente del autor:** ver la página en la sesión (miniatura del avatar y diálogo de contraseña) y el primer
+  inicio de sesión real con Sumi.
