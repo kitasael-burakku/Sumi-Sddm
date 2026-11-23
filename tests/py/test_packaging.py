@@ -1,5 +1,6 @@
-"""El PKGBUILD: versión igual a VERSION, nada calculado con herramientas externas (namcap no las tiene) y un
-`package()` que deja la CLI usable en /usr/lib/sumi-sddm (se ejecuta en un directorio temporal, sin root)."""
+"""El PKGBUILD: versión igual a VERSION, nada calculado con herramientas externas (namcap no las tiene) y sus dos
+`package_*()`: el tema con la CLI usable en /usr/lib/sumi-sddm, y el editor (se ejecutan en un directorio temporal,
+sin root ni makepkg)."""
 from __future__ import annotations
 
 import json
@@ -31,6 +32,14 @@ class PackagingTest(unittest.TestCase):
 
 
 
+def build(pkgdir: Path, name: str) -> None:
+    """Lo que hace makepkg con un subpaquete: `package_<name>` con pkgdir y pkgname."""
+    arch = ROOT / "packaging" / "arch"
+    script = 'set -e; source ./PKGBUILD; startdir="$1"; pkgdir="$2"; pkgname="$3"; "package_$3"'
+    subprocess.run(["bash", "-c", script, "bash", str(arch), str(pkgdir), name], cwd=arch, check=True,
+                   capture_output=True, text=True, timeout=60)
+
+
 class PackageContentTest(unittest.TestCase):
     """`package()` del PKGBUILD en un pkgdir temporal: lo que pacman instalaría, sin makepkg ni fakeroot."""
 
@@ -38,10 +47,9 @@ class PackageContentTest(unittest.TestCase):
     def setUpClass(cls):
         cls._tmp = tempfile.TemporaryDirectory(prefix="sumi-pkg-")
         cls.pkg = Path(cls._tmp.name) / "pkg"
-        arch = ROOT / "packaging" / "arch"
-        script = 'set -e; source ./PKGBUILD; startdir="$1"; pkgdir="$2"; package'
-        subprocess.run(["bash", "-c", script, "bash", str(arch), str(cls.pkg)], cwd=arch, check=True,
-                       capture_output=True, text=True, timeout=60)
+        cls.editor_pkg = Path(cls._tmp.name) / "pkg-editor"
+        build(cls.pkg, "sumi-sddm")
+        build(cls.editor_pkg, "sumi-sddm-editor")
         cls.lib = cls.pkg / "usr" / "lib" / "sumi-sddm"
         cls.home = Path(cls._tmp.name) / "home"
         cls.home.mkdir()
@@ -119,6 +127,71 @@ class PackageContentTest(unittest.TestCase):
             p = self.cli(cmd)
             self.assertEqual(p.returncode, 2, cmd)
             self.assertIn("sólo está disponible en el repositorio", p.stderr + p.stdout, cmd)
+
+    def test_split(self):
+        text = (ROOT / "packaging" / "arch" / "PKGBUILD").read_text()
+        self.assertIn("pkgname=('sumi-sddm' 'sumi-sddm-editor')", text)
+        self.assertFalse(list(self.pkg.rglob("sumi_sddm_editor")), "el tema no lleva el editor")
+        self.assertNotIn("pyside6", text.split("package_sumi-sddm()")[1].split("package_sumi-sddm-editor()")[0],
+                         "el tema nunca depende de PySide6")
+
+    def test_editor_files(self):
+        lib = self.editor_pkg / "usr/lib/sumi-sddm/editor"
+        src = ROOT / "editor" / "sumi_sddm_editor"
+        want = sorted(f.name for f in src.iterdir() if f.suffix in (".py", ".qml") or f.name == "qmldir")
+        self.assertEqual(sorted(f.name for f in (lib / "sumi_sddm_editor").iterdir()), want)
+        self.assertTrue(os.access(lib / "sumi-sddm-editor", os.X_OK))
+        bin_ = self.editor_pkg / "usr/bin/sumi-sddm-editor"
+        self.assertEqual(bin_.read_text().splitlines()[-1],
+                         'exec /usr/bin/python3 -I -B /usr/lib/sumi-sddm/editor/sumi-sddm-editor "$@"')
+        self.assertTrue((self.editor_pkg / "usr/share/icons/hicolor/scalable/apps/sumi-sddm-editor.svg").is_file())
+        self.assertTrue((self.editor_pkg / "usr/share/licenses/sumi-sddm-editor/LICENSE").is_file())
+        self.assertEqual(list(self.editor_pkg.rglob("__pycache__")), [])
+        # sólo lo del editor: nada del tema, la CLI ni el helper
+        self.assertFalse((self.editor_pkg / "usr/share/sddm").exists())
+        self.assertFalse((self.editor_pkg / "usr/lib/sumi-sddm/tools").exists())
+
+    def test_editor_desktop_entry(self):
+        desktop = self.editor_pkg / "usr/share/applications/sumi-sddm-editor.desktop"
+        text = desktop.read_text()
+        self.assertIn("Exec=sumi-sddm-editor\n", text)
+        self.assertIn("Icon=sumi-sddm-editor\n", text)
+        self.assertNotIn("NotShowIn", text, "D5: también se enseña con Sumi Shell")
+        if shutil.which("desktop-file-validate"):
+            p = subprocess.run(["desktop-file-validate", str(desktop)], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
+    @unittest.skipUnless(subprocess.run([sys.executable, "-c", "import PySide6.QtQuick"],
+                                        capture_output=True).returncode == 0, "sin PySide6")
+    def test_editor_starts_from_the_package(self):
+        # La ventana del paquete, sin la CLI en el PATH: debe cargar sin avisos de QML y decir «missing».
+        code = r"""
+import sys
+sys.path.insert(0, sys.argv[1])
+from PySide6.QtCore import QEventLoop, QUrl, qInstallMessageHandler
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuickControls2 import QQuickStyle
+from sumi_sddm_editor.backend import Backend
+msgs = []
+qInstallMessageHandler(lambda m, c, t: msgs.append(t))
+QQuickStyle.setStyle("Fusion")
+app = QGuiApplication([])
+b = Backend()
+e = QQmlApplicationEngine()
+e.setInitialProperties({"backend": b})
+e.load(QUrl.fromLocalFile(sys.argv[1] + "/sumi_sddm_editor/Main.qml"))
+b.load()
+for _ in range(20):
+    app.processEvents(QEventLoop.AllEvents, 20)
+print(bool(e.rootObjects()), b.status, [m for m in msgs if "qml" in m.lower()])
+del e
+"""
+        env = {"PATH": "/nonexistent", "HOME": str(self.home), "QT_QPA_PLATFORM": "offscreen",
+               "QT_QUICK_BACKEND": "software", "LANG": "C.UTF-8"}
+        p = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(self.editor_pkg / "usr/lib/sumi-sddm/editor")],
+                           env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.stdout.strip(), "True missing []", p.stderr[-2000:])
 
     def test_install_user_refused(self):
         p = self.cli("install", "--user", "--json")

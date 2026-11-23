@@ -16,8 +16,13 @@ except ImportError:          # pragma: no cover - depende del sistema
 
 
 def app():
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    # Siempre offscreen y sin el tema de Qt de quien ejecuta las pruebas: con `setdefault`, una sesión con
+    # QT_QPA_PLATFORM=wayland abría las ventanas de prueba en su escritorio, y qt6ct imponía su paleta.
+    if QGuiApplication.instance() is None:
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        os.environ["QT_QUICK_BACKEND"] = "software"
+        os.environ.pop("QT_QPA_PLATFORMTHEME", None)
+        os.environ.pop("QT_STYLE_OVERRIDE", None)
     return QGuiApplication.instance() or QGuiApplication([])
 
 

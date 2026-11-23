@@ -43,6 +43,8 @@ ApplicationWindow {
         return g ? g.label : "";
     }
     property bool closeWhenIdle: false
+    /** Los tonos propios en uso (diagnóstico y pruebas: claro/oscuro). */
+    readonly property QtObject tones: Tones
     property bool showPreview: true
     readonly property bool showAvatar: win.query.length > 0 ? "avatar picture photo".indexOf(win.query) >= 0
                                                             : win.group === "users"
@@ -128,6 +130,7 @@ ApplicationWindow {
             objectName: "retry"
             visible: ["missing", "incompatible", "broken"].indexOf(win.backend.status) >= 0
             text: "Try again"
+            Accessible.name: text
             Layout.alignment: Qt.AlignHCenter
             onClicked: win.backend.load()
         }
@@ -175,6 +178,7 @@ ApplicationWindow {
                             && (win.backend.values[k] || {}).set === true).length
                         objectName: "group-" + gd.modelData.id
                         width: ListView.view.width
+                        focusPolicy: Qt.StrongFocus         // por defecto los delegados no aceptan Tab
                         text: gd.modelData.label + (gd.custom > 0 ? "  ·  " + gd.custom : "")
                         highlighted: win.page === "settings" && win.query.length === 0 && win.group === gd.modelData.id
                         Accessible.name: gd.modelData.label + (gd.custom > 0 ? ", " + gd.custom + " customised" : "")
@@ -191,6 +195,7 @@ ApplicationWindow {
                     id: sysItem
                     objectName: "page-system"
                     text: "Login screen"
+                    focusPolicy: Qt.StrongFocus
                     highlighted: win.page === "system"
                     Layout.fillWidth: true
                     Accessible.name: "Login screen" + (win.needsApply ? ", your settings are not applied yet" : "")
@@ -204,7 +209,7 @@ ApplicationWindow {
                         width: 8
                         height: 8
                         radius: 4
-                        color: "#e08a1e"
+                        color: Tones.pending
                         anchors.right: parent.right
                         anchors.rightMargin: 12
                         anchors.verticalCenter: parent.verticalCenter
@@ -295,7 +300,7 @@ ApplicationWindow {
                 objectName: "message"
                 readonly property bool isError: win.backend.error.length > 0
                 text: isError ? win.backend.error : win.backend.notice
-                color: isError ? "#d9534f" : palette.windowText
+                color: isError ? Tones.error : palette.windowText
                 elide: Text.ElideRight
                 Layout.fillWidth: true
                 Accessible.role: Accessible.AlertMessage
@@ -331,11 +336,13 @@ ApplicationWindow {
             Button {
                 objectName: "togglePreview"
                 text: win.showPreview ? "Hide preview" : "Show preview"
+                Accessible.name: text
                 onClicked: win.showPreview = !win.showPreview
             }
             Button {
                 objectName: "restore"
                 text: "Restore previous"
+                Accessible.name: "Restore the settings saved before the last reset"
                 ToolTip.visible: hovered
                 ToolTip.text: "Bring back the settings saved before the last reset"
                 onClicked: win.backend.restorePrevious()

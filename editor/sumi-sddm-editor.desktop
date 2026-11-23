@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Login Screen (Sumi)
+GenericName=Login Screen Settings
+Comment=Customise the Sumi SDDM login screen and apply it
+Exec=sumi-sddm-editor
+Icon=sumi-sddm-editor
+Terminal=false
+Categories=Qt;Settings;DesktopSettings;
+Keywords=sddm;login;greeter;lock;theme;wallpaper;avatar;
+StartupNotify=true
+StartupWMClass=sumi-sddm-editor

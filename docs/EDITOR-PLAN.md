@@ -4,8 +4,9 @@
 > `/usr/bin/sumi-sddm` responde `kind: "system"`, el tema sigue activo y en sincronía; la copia de usuario se
 > quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). **Fase 2 hecha** (formulario). **Fase 3 hecha** (vista
 > previa, fuentes, avatar). **Fase 4 escrita y probada con la CLI falsa** (38 pruebas de ventana en total);
-> probada de verdad por el autor (Apply, Restore, Use, contraseña incorrecta y cancelada): **cerrada**. Fase 5
-> en curso. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> probada de verdad por el autor (Apply, Restore, Use, contraseña incorrecta y cancelada): **cerrada**. **Fase 5
+> hecha** (paquetes 0.6.0-1 construidos): falta que el autor los instale y abra el editor desde el lanzador en
+> una sesión que no sea Hyprland (KDE o GNOME en una VM). Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
 > sugerencias de clave.
 
 ## Por qué
@@ -213,6 +214,26 @@ tras una contraseña incorrecta: polkit vuelve a preguntar y el editor no ve nad
 lo aplicado = `af29455d…`, en sincronía. Tercera ronda (03:03): dos contraseñas **canceladas**; el pie dijo «Authentication cancelled · nothing
 changed», el registro muestra las dos peticiones sin ejecución y ni `/etc/sddm.conf` ni lo aplicado cambiaron.
 **Fase 4 cerrada.**
+
+**Cómo quedó (fase 5).** PKGBUILD dividido (`pkgbase=sumi-sddm`): `sumi-sddm` (tema, helper, CLI; nunca
+PySide6) y `sumi-sddm-editor` (`/usr/lib/sumi-sddm/editor/`, `/usr/bin/sumi-sddm-editor`, el `.desktop`
+«Login Screen (Sumi)» sin `NotShowIn` (D5) y el icono SVG en hicolor). Versión 0.6.0.
+
+- namcap: lo mismo que antes más falsos positivos explicados en el PKGBUILD (la dependencia de `sumi-sddm` es la
+  CLI, que se lanza como proceso). Un PKGBUILD dividido exige en `makedepends` lo que piden los subpaquetes:
+  `pyside6` y `hicolor-icon-theme`; `check()` aprovecha y prueba también el backend del editor.
+- Accesibilidad: todo control tiene nombre accesible y entra en la cadena de Tab (probado en todas las páginas
+  con el esquema real). Encontrado y arreglado: los botones con texto no lo exponían como nombre en Qt 6, y los
+  grupos de la barra lateral y «Login screen» no aceptaban Tab (sin ratón no se cambiaba de página).
+- Claro/oscuro: Fusion sigue la paleta del sistema (también si cambia con la ventana abierta); los pocos tonos
+  propios están en `Tones.qml` con contraste ≥ 4,5:1 en los dos modos. «Already applied» en vez de un botón
+  sólo desactivado (con algunas paletas, p. ej. la de qt6ct del autor, no se distinguía).
+- Fallo de las pruebas corregido: `qt_support.py` usaba `setdefault` para `QT_QPA_PLATFORM`, así que en una
+  sesión Wayland las ventanas de prueba de las fases 2–4 se abrían en el escritorio de quien las ejecutaba (y
+  heredaban su qt6ct). Ahora siempre offscreen y sin tema de plataforma.
+- Gotchas de PySide: los envoltorios de `nextItemInFocusChain` causan un segfault en la recolección final de
+  Python (la cadena de Tab se recorre en QML); `QGuiApplication.setPalette` antes de crear el motor no llega a
+  Fusion (en las pruebas se cambia con la ventana abierta).
 
 ## Fases
 

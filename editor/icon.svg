@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Sumi SDDM editor: la pantalla de inicio en miniatura (notch arriba, avatar, campo de contraseña). -->
+  <defs>
+    <linearGradient id="ink" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#2a2f3d"/>
+      <stop offset="1" stop-color="#0c0d10"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.72" cy="0.28" r="0.7">
+      <stop offset="0" stop-color="#a9bdff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#a9bdff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#ink)"/>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#glow)"/>
+  <rect x="8.5" y="8.5" width="111" height="111" rx="23.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <!-- el notch, pegado al borde de arriba -->
+  <path d="M38 8 H90 V14 a10 10 0 0 1 -10 10 H48 a10 10 0 0 1 -10 -10 Z" fill="#000000"/>
+  <circle cx="83" cy="15.5" r="2.4" fill="#a9bdff"/>
+  <!-- avatar -->
+  <circle cx="64" cy="58" r="15" fill="#a9bdff" fill-opacity="0.16" stroke="#a9bdff" stroke-width="3"/>
+  <circle cx="64" cy="54" r="5" fill="#f3f3f5"/>
+  <path d="M55 66 a9 8 0 0 1 18 0" fill="#f3f3f5"/>
+  <!-- campo de contraseña -->
+  <rect x="34" y="84" width="60" height="14" rx="7" fill="#1c1c1f" stroke="#ffffff" stroke-opacity="0.12"/>
+  <circle cx="45" cy="91" r="2" fill="#f3f3f5"/>
+  <circle cx="53" cy="91" r="2" fill="#f3f3f5"/>
+  <circle cx="61" cy="91" r="2" fill="#f3f3f5"/>
+  <circle cx="86" cy="91" r="4" fill="#a9bdff"/>
+</svg>

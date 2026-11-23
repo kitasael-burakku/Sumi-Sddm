@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 
 def main(argv: list[str] | None = None) -> int:
     from PySide6.QtCore import QUrl
-    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtGui import QGuiApplication, QIcon
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuickControls2 import QQuickStyle
 
@@ -24,6 +24,11 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName("sumi-sddm-editor")
     app.setApplicationDisplayName("Login Screen (Sumi)")
     app.setDesktopFileName("sumi-sddm-editor")
+    # El del tema de iconos (el paquete lo instala en hicolor); desde el repositorio, el SVG de editor/.
+    icon = QIcon.fromTheme("sumi-sddm-editor")
+    if icon.isNull() and (HERE.parent / "icon.svg").is_file():
+        icon = QIcon(str(HERE.parent / "icon.svg"))
+    app.setWindowIcon(icon)
 
     backend = Backend()
     engine = QQmlApplicationEngine()

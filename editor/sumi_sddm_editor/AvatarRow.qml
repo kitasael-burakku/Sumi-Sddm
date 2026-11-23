@@ -70,7 +70,7 @@ Item {
                 objectName: "caption"
                 visible: text.length > 0
                 text: root.caption
-                color: root.info && root.info.error ? "#d9534f" : palette.placeholderText
+                color: root.info && root.info.error ? Tones.error : palette.placeholderText
                 wrapMode: Text.Wrap
                 font.pointSize: Qt.application.font.pointSize * 0.9
                 Layout.fillWidth: true

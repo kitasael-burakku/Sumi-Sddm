@@ -25,7 +25,7 @@ from qt_support import QGuiApplication, app, flush_deletes, spin, wait  # noqa: 
 
 if QGuiApplication is not None:
     from PySide6.QtCore import Q_ARG, Q_RETURN_ARG, QEvent, QMetaObject, QObject, Qt, QUrl, qInstallMessageHandler
-    from PySide6.QtGui import QColor, QImage, QKeyEvent
+    from PySide6.QtGui import QAccessible, QColor, QImage, QKeyEvent
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtQuick import QQuickItem
     from PySide6.QtQuickControls2 import QQuickStyle
@@ -51,20 +51,31 @@ class WindowCase(unittest.TestCase):
 
     def tearDown(self):
         warnings = self.qml_warnings()
-        # Desmontaje en orden y completo AHORA: nada de esta ventana debe destruirse durante la prueba siguiente.
-        if self.engine is not None:
-            wait(lambda: self.quiet(), 5)
-            self.b.shutdown()
-            if self.win is not None:
-                self.win.setProperty("closeWhenIdle", False)
-                self.win.close()
-            self.engine.deleteLater()
-            flush_deletes()
-            self.b.deleteLater()
-            flush_deletes()
+        self.close_window()
         qInstallMessageHandler(self._old_handler)
         self._tmp.cleanup()
         self.assertEqual(warnings, [], "avisos de QML")
+
+    def close_window(self) -> None:
+        """Desmontaje en orden y completo AHORA: nada de esta ventana debe destruirse durante la prueba siguiente."""
+        if self.engine is None:
+            return
+        wait(lambda: self.quiet(), 5)
+        self.b.shutdown()
+        if self.win is not None:
+            self.win.setProperty("closeWhenIdle", False)
+            self.win.close()
+        win = self.engine.rootObjects()[0] if self.engine.rootObjects() else None
+        self.engine.deleteLater()
+        flush_deletes()
+        # La ventana se destruye en diferido: el backend, sólo cuando ya no existe (si no, sus enlaces se
+        # reevalúan con backend = null y QML avisa).
+        import shiboken6
+        wait(lambda: win is None or not shiboken6.isValid(win), 2)
+        flush_deletes()
+        self.b.deleteLater()
+        flush_deletes()
+        self.engine = self.win = None
 
     def open(self, **kw) -> None:
         kw.setdefault("write_delay_ms", 40)
@@ -599,6 +610,7 @@ class EditorUiFakeTest(WindowCase):
         self.assertEqual(self.text("message"), "Applied to the login screen")
         self.assertTrue(self.text("syncText").startswith("Applied"))
         self.assertFalse(self.item("apply").isEnabled())
+        self.assertEqual(self.text("apply"), "Already applied", "no sólo con el gris de desactivado")
         self.assertFalse(self.item("applyDot").isVisible())
 
     def test_quick_apply_after_pending_writes(self):
@@ -707,9 +719,8 @@ class EditorUiFakeTest(WindowCase):
         self.win = None
 
 
-@unittest.skipIf(QGuiApplication is None, "PySide6 no está instalado")
-class EditorUiRealCliTest(WindowCase):
-    """Criterio de salida de la fase 2 con la CLI del repositorio (configuración en un directorio temporal)."""
+class RealCliCase(WindowCase):
+    """La CLI del repositorio con la configuración en un directorio temporal (nunca la del usuario)."""
 
     def setUp(self):
         super().setUp()
@@ -735,6 +746,11 @@ class EditorUiRealCliTest(WindowCase):
         self.assertTrue(self.conf.is_file())
         vals = json.loads(self.terminal("config", "show", "--json"))["values"]
         return {k: v["value"] for k, v in vals.items() if v["set"]}
+
+
+@unittest.skipIf(QGuiApplication is None, "PySide6 no está instalado")
+class EditorUiRealCliTest(RealCliCase):
+    """Criterios de salida de las fases 2 y 3 con la CLI del repositorio."""
 
     def test_writes_reach_theme_conf_and_outside_changes_survive(self):
         self.open(program=str(CLI))
@@ -792,6 +808,132 @@ class EditorUiRealCliTest(WindowCase):
             self.assertEqual(max(range(3), key=lambda i: rgb[i]), channel, (colour, rgb))
         self.assertEqual(self.saved(), {"backgroundColor": "#00ff00"})
 
+
+
+def cpp(obj) -> int:
+    """Identidad del objeto C++ (PySide puede dar envoltorios distintos para el mismo elemento)."""
+    import shiboken6
+    return shiboken6.getCppPointer(obj)[0]
+
+
+def luminance(c) -> float:
+    def ch(v: float) -> float:
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF())
+
+
+def contrast(a, b) -> float:
+    la, lb = sorted((luminance(a), luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+@unittest.skipIf(QGuiApplication is None, "PySide6 no está instalado")
+class EditorUiAccessTest(RealCliCase):
+    """Fase 5 con el esquema real (todas las claves): nombres accesibles, teclado y tema claro/oscuro."""
+
+    INTERACTIVE = {QAccessible.Role.Button, QAccessible.Role.CheckBox, QAccessible.Role.Slider,
+                   QAccessible.Role.ComboBox, QAccessible.Role.EditableText, QAccessible.Role.RadioButton,
+                   QAccessible.Role.PageTab, QAccessible.Role.ListItem, QAccessible.Role.SpinBox} \
+        if QGuiApplication is not None else set()
+
+    def controls(self):
+        """Cada control visible y activo, con su interfaz accesible."""
+        for it in self.items(self.win.contentItem()):
+            if not (it.isVisible() and it.isEnabled() and it.opacity() > 0):
+                continue
+            acc = QAccessible.queryAccessibleInterface(it)
+            if acc is not None and acc.role() in self.INTERACTIVE and it.property("focusPolicy") is not None:
+                yield it, acc
+
+    def pages(self):
+        """Cada grupo del esquema y la página del sistema, una a una."""
+        for g in self.b.groups:
+            self.show(g["id"])
+            spin(0.05)
+            yield g["id"]
+        self.click(self.item("page-system"))
+        self.idle()
+        yield "system"
+
+    def test_every_control_has_a_name(self):
+        self.open(program=str(CLI))
+        self.ready()
+        missing, seen = [], 0
+        for page in self.pages():
+            for it, acc in self.controls():
+                seen += 1
+                if not acc.text(QAccessible.Text.Name).strip():
+                    missing.append(f"{page}: {it.objectName() or it.metaObject().className()}")
+        self.assertGreater(seen, 100)
+        self.assertEqual(missing, [])
+
+    def test_every_control_is_reachable_with_tab(self):
+        # La cadena de Tab se recorre en QML: los envoltorios que PySide crea para nextItemInFocusChain acaban en
+        # un segfault en la recolección final de Python (shiboken los invalida sobre memoria ya liberada).
+        from PySide6.QtCore import QByteArray
+        from PySide6.QtQml import QQmlComponent
+        self.open(program=str(CLI))
+        self.ready()
+        comp = QQmlComponent(self.engine)
+        comp.setData(QByteArray(b"""import QtQuick
+QtObject {
+    function outside(start, controls) {
+        const seen = new Set();
+        let it = start;
+        for (let i = 0; i < 5000 && it; i++) {
+            seen.add(it);
+            it = it.nextItemInFocusChain(true);
+            if (it === start) break;
+        }
+        return controls.filter(c => !seen.has(c)).map(c => c.objectName || c.toString()).join(", ");
+    }
+}"""), QUrl())
+        walker = comp.create()
+        self.assertIsNotNone(walker, comp.errorString())
+        for page in self.pages():
+            controls = [x for x, _acc in self.controls()]       # todos, no sólo los que ya aceptan Tab
+            self.assertGreater(len(controls), 3, page)
+            out = QMetaObject.invokeMethod(walker, "outside", Q_RETURN_ARG("QVariant"),
+                                           Q_ARG("QVariant", self.item("search")), Q_ARG("QVariant", controls))
+            self.assertEqual(out, "", page)
+
+    def test_keyboard_switches_pages(self):
+        self.open(program=str(CLI))
+        self.ready()
+        clock = self.item("group-clock")
+        clock.forceActiveFocus()
+        self.key(clock, Qt.Key.Key_Space)
+        self.assertEqual(self.item("pageTitle").property("text"), "Clock")
+        sysitem = self.item("page-system")
+        sysitem.forceActiveFocus()
+        self.key(sysitem, Qt.Key.Key_Space)
+        self.idle()
+        self.assertTrue(self.item("installedText").isVisible() or self.item("notInstalled").isVisible())
+
+    def tones(self) -> dict:
+        t = self.win.property("tones")
+        return {k: t.property(k) for k in ("dark", "error", "pending", "window")}
+
+    def test_light_and_dark(self):
+        # Lo que hacen KDE, GNOME (su tema de plataforma) o qt6ct: dar a la aplicación una paleta clara u oscura,
+        # también con la ventana abierta (quien cambia el modo del escritorio con el editor en marcha). Fusion y
+        # los tonos propios (Tones) deben seguirla. Offscreen no tiene tema de plataforma: se fija la paleta.
+        from PySide6.QtGui import QPalette
+        self.open(program=str(CLI))
+        self.ready()
+        try:
+            for base, dark in (("#2b2d31", True), ("#efefef", False)):
+                QGuiApplication.setPalette(QPalette(QColor(base)))
+                spin(0.1)
+                t = self.tones()
+                self.assertEqual(t["dark"], dark, base)
+                img = self.win.grabWindow()
+                bg = img.pixelColor(img.width() // 2, img.height() // 2)
+                self.assertEqual(luminance(bg) < 0.2, dark, (base, bg.name()))
+                for k in ("error", "pending"):
+                    self.assertGreaterEqual(contrast(t[k], t["window"]), 4.5, (base, k, t[k].name()))
+        finally:
+            QGuiApplication.setPalette(QPalette())
 
 if __name__ == "__main__":
     unittest.main()

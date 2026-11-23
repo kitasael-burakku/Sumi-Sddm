@@ -21,6 +21,8 @@ borde superior de la pantalla: está recogida mientras no la usas y se despliega
 - **Una configuración rota nunca te deja fuera.** Al configurar se valida todo de forma estricta. En la pantalla
   de inicio, un valor que no se entiende vuelve a su valor por defecto.
 - **Se usa entera con el teclado** y es accesible: cada control tiene rol y nombre para lectores de pantalla.
+- **Una ventana para configurarlo** (opcional): «Login Screen (Sumi)», con vista previa y botón para aplicar,
+  en cualquier escritorio (ver [La ventana de ajustes](#la-ventana-de-ajustes)).
 - **Independiente.** No necesita Quickshell, Hyprland ni nada más. Si usas Sumi Shell, sus ajustes incluyen
   una página para configurarlo (ver [Integración](#integración-con-sumi-shell)).
 
@@ -29,6 +31,7 @@ borde superior de la pantalla: está recogida mientras no la usas y se despliega
 - SDDM ≥ 0.21 con el greeter de **Qt 6** (`sddm-greeter-qt6`).
 - `qt6-declarative`, `python`, `polkit`, `util-linux`, `systemd`.
 - Opcional: `qt6-imageformats`, para wallpapers en WebP.
+- Opcional, sólo para la ventana de ajustes: `pyside6`.
 
 El paquete está pensado para **Arch Linux y derivadas** (CachyOS, EndeavourOS…). Si usas otra distribución,
 mira [Otras distribuciones](#otras-distribuciones).
@@ -39,9 +42,12 @@ mira [Otras distribuciones](#otras-distribuciones).
 git clone https://github.com/kitasael-burakku/Sumi-Sddm.git
 cd Sumi-Sddm
 
-# Construir e instalar el paquete: el tema, el helper y el comando `sumi-sddm`. NO activa el tema.
+# Construir los paquetes (hace falta pyside6 para construir; el tema instalado no lo necesita).
 cd packaging/arch && makepkg
-sudo pacman -U sumi-sddm-*.pkg.tar.zst
+# El tema, el helper y el comando `sumi-sddm`. NO activa el tema.
+sudo pacman -U sumi-sddm-0*.pkg.tar.zst
+# Opcional: la ventana de ajustes «Login Screen (Sumi)».
+sudo pacman -U sumi-sddm-editor-*.pkg.tar.zst
 ```
 
 Sin el paquete (o para desarrollar), `tools/sumi-sddm install --user` instala sólo el comando en `~/.local/bin`,
@@ -101,6 +107,18 @@ movimiento y comportamiento**. Cada una, con su rango y su valor por defecto, es
 > wallpaper dentro del tema instalado en lugar de enlazarlo, y las tipografías instaladas sólo en tu `$HOME` no
 > sirven (`config fonts` las marca con `~`).
 
+## La ventana de ajustes
+
+El paquete opcional `sumi-sddm-editor` añade **Login Screen (Sumi)** al menú de aplicaciones (o
+`sumi-sddm-editor` desde una terminal). Es lo mismo que `sumi-sddm config`, pero con un formulario por grupos,
+búsqueda, vista previa al momento, selector de tipografías (marca las que el greeter no puede ver), tu avatar y
+una página **Login screen** para aplicar, activar o volver al tema anterior; cada una de esas tres pide la
+contraseña de un administrador. Sigue el tema claro u oscuro del sistema, se usa entera con el teclado y no
+corre nunca como root: todo lo hace la orden `sumi-sddm`.
+
+Puede estar abierta a la vez que la terminal o que los ajustes de Sumi Shell: si algo cambia por otro lado, lo
+avisa y recarga en vez de pisarlo.
+
 ## Teclado
 
 | Dónde | Tecla | Acción |
@@ -142,6 +160,7 @@ que un archivo en `/etc/sddm.conf.d/` no basta si `/etc/sddm.conf` ya define un 
 tools/sumi-sddm check                # validación del esquema + lint + todas las pruebas (Python y QML) + humo
 tools/sumi-sddm render --size all    # capturas de todos los escenarios y resoluciones en tests/out/
 tools/sumi-sddm gen                  # regenerar theme.conf, schema.js y CONFIG.md tras editar el esquema
+editor/sumi-sddm-editor              # la ventana de ajustes desde el repositorio (usa `sumi-sddm` del PATH)
 ```
 
 La prueba de humo (`smoke`) carga el tema en el greeter real (`sddm-greeter-qt6 --test-mode`, sin pantalla) y
@@ -165,7 +184,8 @@ tools/sumi-sddm            CLI sin privilegios: config, wallpaper, avatar, previ
 tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas, bloqueo
 tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
 system/                    helper privilegiado (pkexec) y su acción de polkit
-packaging/arch/            PKGBUILD (tema + helper + acción + CLI en /usr/bin); no activa nada
+editor/                    ventana de ajustes (PySide6 + QML): backend.py y Main/Field/Preview/SystemPanel.qml
+packaging/arch/            PKGBUILD dividido: sumi-sddm (tema, helper, CLI) y sumi-sddm-editor; no activa nada
 integration/sumi-shell/    página Login screen para los ajustes de Sumi Shell
 tests/                     pruebas Python y QML, y casos compartidos entre ambos
 docs/                      configuración, contrato JSON, recuperación e informes de cada fase del desarrollo

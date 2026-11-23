@@ -78,7 +78,7 @@ ScrollView {
                 objectName: "syncText"
                 text: root.inSync ? "Applied · the login screen shows what you see here"
                                   : "Not applied yet · the login screen still shows the previous settings"
-                color: root.inSync ? palette.windowText : "#c77c11"
+                color: root.inSync ? palette.windowText : Tones.pending
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
@@ -119,7 +119,8 @@ ScrollView {
 
             Button {
                 objectName: "apply"
-                text: "Apply to login screen"
+                // con el texto, no sólo con el gris de «desactivado»: algunas paletas apenas lo distinguen
+                text: root.inSync ? "Already applied" : "Apply to login screen"
                 enabled: !root.inSync && root.busy.length === 0
                 highlighted: !root.inSync
                 Accessible.name: "Apply your settings to the login screen"
@@ -190,13 +191,14 @@ ScrollView {
                         : !root.greeter.sumi ? "Last login screen: another theme (" + root.greeter.theme + ")"
                         : root.greeter.ok ? "Last login screen: Sumi started correctly"
                         : "Last login screen: Sumi had problems"
-                    color: root.greeter && root.greeter.sumi && !root.greeter.ok ? "#d9534f" : palette.windowText
+                    color: root.greeter && root.greeter.sumi && !root.greeter.ok ? Tones.error : palette.windowText
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }
                 ToolButton {
                     objectName: "refreshLog"
                     text: "Refresh"
+                    Accessible.name: "Refresh the login screen status"
                     onClicked: { root.backend.refreshSystem(); root.backend.refreshLog(); }
                 }
             }
@@ -243,6 +245,7 @@ ScrollView {
                 objectName: "recoveryDoc"
                 visible: root.backend.recoveryDoc.length > 0
                 text: "Open the recovery guide"
+                Accessible.name: text
                 onClicked: Qt.openUrlExternally(root.backend.recoveryDoc)
             }
         }

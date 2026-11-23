@@ -81,7 +81,7 @@ Item {
                 objectName: "caption"
                 visible: text.length > 0
                 text: root.problem.length > 0 ? root.problem : root.caption
-                color: root.problem.length > 0 || root.warned ? "#d9534f" : palette.placeholderText
+                color: root.problem.length > 0 || root.warned ? Tones.error : palette.placeholderText
                 wrapMode: Text.Wrap
                 font.pointSize: Qt.application.font.pointSize * 0.9
                 Layout.fillWidth: true
@@ -407,7 +407,7 @@ Item {
                                 Label {
                                     visible: !fd.modelData.system
                                     text: "Only in your home folder · the login screen can't use it"
-                                    color: "#d9534f"
+                                    color: Tones.error
                                     font.pointSize: Qt.application.font.pointSize * 0.8
                                 }
                             }

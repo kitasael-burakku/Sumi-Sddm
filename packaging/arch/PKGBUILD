@@ -1,19 +1,22 @@
-# Sumi SDDM — paquete local, construido desde este repositorio (sin descargas).
-#   cd packaging/arch && makepkg            # construir (sin root)
-#   sudo pacman -U sumi-sddm-*.pkg.tar.zst  # instalar: NO activa el tema (eso es `sumi-sddm system activate`)
+# Sumi SDDM — paquetes locales, construidos desde este repositorio (sin descargas).
+#   cd packaging/arch && makepkg              # construir los dos (sin root)
+#   sudo pacman -U sumi-sddm-0*.pkg.tar.zst   # el tema, la CLI y el helper: NO activa el tema
+#   sudo pacman -U sumi-sddm-editor-*.pkg.tar.zst   # opcional: la ventana «Login Screen (Sumi)» (PySide6)
 #   El paquete trae la CLI en /usr/bin/sumi-sddm; `install --user` sólo hace falta sin el paquete.
-pkgname=sumi-sddm
+# Dividido para que el tema nunca dependa de PySide6 (docs/EDITOR-PLAN.md, D2).
+pkgbase=sumi-sddm
+pkgname=('sumi-sddm' 'sumi-sddm-editor')
 # Literal (namcap analiza el PKGBUILD sin coreutils); tests/py/test_packaging.py exige que coincida con VERSION.
-pkgver=0.5.0
+pkgver=0.6.0
 pkgrel=1
-pkgdesc="Minimal SDDM login theme with a top notch, plus its command-line tool and a polkit helper to apply its settings"
+pkgdesc="Minimal SDDM login theme with a top notch"
 arch=('any')
 url="https://github.com/kitasael-burakku/Sumi-Sddm"
 # El proyecto es MIT (LICENSE); Inter va con la SIL OFL 1.1.
 license=('MIT' 'OFL-1.1')
-depends=('sddm' 'qt6-declarative' 'python' 'polkit' 'util-linux' 'systemd')
-optdepends=('qt6-imageformats: WebP wallpapers')
-install=sumi-sddm.install
+# pyside6 e hicolor-icon-theme: los usa el subpaquete del editor (namcap los exige en un PKGBUILD dividido);
+# check() además prueba su backend con pyside6.
+makedepends=('python' 'pyside6' 'hicolor-icon-theme')
 source=()
 
 _src() { realpath "$startdir/../.."; }
@@ -24,9 +27,15 @@ check() {
   [ "$(tr -d '[:space:]' < VERSION)" = "$pkgver" ] || { echo "pkgver ≠ VERSION"; return 1; }
   python3 -B -m unittest discover -s tests/py -p 'test_helper.py'
   python3 -B -m unittest discover -s tests/py -p 'test_packaging.py'
+  QT_QPA_PLATFORM=offscreen python3 -B -m unittest discover -s tests/py -p 'test_editor_backend.py'
 }
 
-package() {
+package_sumi-sddm() {
+  pkgdesc="Minimal SDDM login theme with a top notch, plus its command-line tool and a polkit helper to apply its settings"
+  depends=('sddm' 'qt6-declarative' 'python' 'polkit' 'util-linux' 'systemd')
+  optdepends=('qt6-imageformats: WebP wallpapers'
+              'sumi-sddm-editor: graphical settings window')
+  install=sumi-sddm.install
   local src
   src="$(_src)"
   # El tema. Sin theme.conf.user ni backgrounds/: los pone el helper con la configuración de cada usuario.
@@ -62,4 +71,24 @@ package() {
   install -Dm0644 "$src/docs/RECUPERACION.md" "$pkgdir/usr/share/doc/$pkgname/RECUPERACION.md"
   install -Dm0644 "$src/docs/CONFIG.md" "$pkgdir/usr/share/doc/$pkgname/CONFIG.md"
   install -Dm0644 "$src/docs/CLI-JSON.md" "$pkgdir/usr/share/doc/$pkgname/CLI-JSON.md"
+}
+
+package_sumi-sddm-editor() {
+  pkgdesc="Settings window for the Sumi SDDM login theme"
+  license=('MIT')
+  # La misma versión: los dos salen de este repositorio (el editor habla con la CLI por el contrato api 1).
+  # sumi-sddm: la CLI, que se lanza como proceso (namcap no lo ve); shiboken6: backend.py lo importa.
+  depends=("sumi-sddm=${pkgver}-${pkgrel}" 'python' 'pyside6' 'shiboken6' 'qt6-declarative' 'hicolor-icon-theme')
+  optdepends=('qt6-svg: window icon outside the desktop launcher')
+  local src f
+  src="$(_src)"
+  install -Dm0755 "$src/editor/sumi-sddm-editor" "$pkgdir/usr/lib/sumi-sddm/editor/sumi-sddm-editor"
+  for f in "$src"/editor/sumi_sddm_editor/*.py "$src"/editor/sumi_sddm_editor/*.qml \
+           "$src"/editor/sumi_sddm_editor/qmldir; do
+    install -Dm0644 "$f" "$pkgdir/usr/lib/sumi-sddm/editor/sumi_sddm_editor/${f##*/}"
+  done
+  install -Dm0755 "$src/packaging/arch/sumi-sddm-editor.sh" "$pkgdir/usr/bin/sumi-sddm-editor"
+  install -Dm0644 "$src/editor/sumi-sddm-editor.desktop" "$pkgdir/usr/share/applications/sumi-sddm-editor.desktop"
+  install -Dm0644 "$src/editor/icon.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/sumi-sddm-editor.svg"
+  install -Dm0644 "$src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
