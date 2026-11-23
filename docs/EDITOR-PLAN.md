@@ -5,8 +5,9 @@
 > quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). **Fase 2 hecha** (formulario). **Fase 3 hecha** (vista
 > previa, fuentes, avatar). **Fase 4 escrita y probada con la CLI falsa** (38 pruebas de ventana en total);
 > probada de verdad por el autor (Apply, Restore, Use, contraseña incorrecta y cancelada): **cerrada**. **Fase 5
-> hecha** (paquetes 0.6.0-1 construidos): falta que el autor los instale y abra el editor desde el lanzador en
-> una sesión que no sea Hyprland (KDE o GNOME en una VM). Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> hecha**: paquetes 0.6.0-1 instalados por el autor el 2026-11-23 (el tema sigue activo y aplicado; el `.desktop`
+> y el icono, en su sitio). **Pendiente:** abrir el editor desde el lanzador en una sesión que no sea Hyprland
+> (KDE o GNOME en una VM); el autor lo deja para más adelante. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
 > sugerencias de clave.
 
 ## Por qué
