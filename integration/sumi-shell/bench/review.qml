@@ -107,7 +107,8 @@ ShellRoot {
             interval: 900; running: true
             onTriggered: {
                 try {
-                    if (typeof page.sddmRows !== "function") {
+                    // la generación de ANTES no tiene la integración, o es la de la Fase 4 (sin `system`)
+                    if (typeof page.sddmRows !== "function" || Svc.SddmTheme.system === undefined) {
                         if (!Quickshell.env("SDDM_REVIEW_OVERLAY")) { win.finish("Árbol sin la integración"); return; }
                         console.log("RELOAD_BASE");
                         Quickshell.watchFiles = false;

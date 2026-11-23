@@ -5,7 +5,10 @@
 
 Cada escenario: copia privada del árbol, HOME/XDG privados, sin compositor ni buses (offscreen, `qs -p`), falsos
 delante de lo que tocaría el sistema (systemctl, loginctl, pkexec…). `sumi-sddm` en el PATH según el escenario:
-  real / terminal   la CLI de verdad (--cli; por defecto la del PATH), escribiendo SÓLO en el XDG privado
+  real / terminal   la CLI del repositorio de Sumi SDDM (--cli para otra), escribiendo SÓLO en el XDG privado.
+                    El «sistema» también es falso: un tema instalado en una raíz privada, un pkexec que ejecuta el
+                    helper del repositorio sobre esa raíz (SUMI_SDDM_HELPER_ROOT), un greeter falso y un
+                    AccountsService falso: Apply / Use / Restore y el avatar nunca tocan el sistema real.
   incompatible      un falso que responde api 2
   missing           ninguna
 No abre ventanas en la sesión, no usa el bus de sesión y no toca el vivo, dotfiles ni ~/.config/sumi-sddm.
@@ -24,6 +27,7 @@ from PIL import Image
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[2]                  # Sumi-SDDM
 SCENARIOS = ["real", "missing", "incompatible", "terminal"]
 NOISE = ("qml: REVIEW ",)
 
@@ -36,6 +40,59 @@ def strip_inhibitor(tree: Path) -> None:
     begin = src.index("    PanelWindow {\n        id: inhibitWin")
     end = src.index("    /**\n     * The logind inhibitor", begin)
     session.write_text(src[:begin] + src[end:])
+
+
+FAKE_GREETER = r'''#!/usr/bin/env python3
+import sys
+sys.path.insert(0, %(tools)r)
+from pathlib import Path
+from sumiconf import Schema, ini, probe
+theme = Path(sys.argv[sys.argv.index("--theme") + 1])
+conf = theme / "theme.conf.user"
+raw = ini.parse(conf.read_text()) if conf.exists() else {}
+print("qml: sumi-sddm: ready users=1 sessions=1 primary=true clock=24h custom=%%d" %% probe.expected_custom(Schema.load(), raw))
+'''
+
+FAKE_BUSCTL = r'''#!/usr/bin/env python3
+import json, os, shutil, sys
+state, icons = os.environ["FAKE_ACCOUNTS_STATE"], os.environ["FAKE_ACCOUNTS_ICONS"]
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+st = json.load(open(state)) if os.path.exists(state) else {"IconFile": os.environ["HOME"] + "/.face"}
+if args[0] == "call" and args[4] == "FindUserByName":
+    print(json.dumps({"type": "o", "data": ["/org/freedesktop/Accounts/User1000"]}))
+elif args[0] == "get-property":
+    print(json.dumps({"type": "s", "data": st["IconFile"]}))
+elif args[0] == "call" and args[4] == "SetIconFile":
+    if args[6] == "":
+        st["IconFile"] = os.environ["HOME"] + "/.face"
+        if os.path.exists(icons + "/me"): os.unlink(icons + "/me")
+    else:
+        shutil.copyfile(args[6], icons + "/me"); st["IconFile"] = icons + "/me"
+    json.dump(st, open(state, "w"))
+'''
+
+
+def fake_system(private: Path) -> dict:
+    """Raíz falsa con el tema «instalado» y orbital activo, pkexec/greeter/AccountsService falsos."""
+    root = private / "sysroot"
+    themes = root / "usr/share/sddm/themes"
+    shutil.copytree(REPO / "theme" / "sumi", themes / "sumi")
+    (themes / "orbital").mkdir(parents=True)
+    (themes / "orbital" / "metadata.desktop").write_text("[SddmGreeterTheme]\nName=orbital\n")
+    (root / "etc").mkdir()
+    (root / "etc/sddm.conf").write_text("[Theme]\nCurrent=orbital\n")
+    fb = private / "fakesys"
+    fb.mkdir()
+    (fb / "greeter").write_text(FAKE_GREETER % {"tools": str(REPO / "tools")})
+    (fb / "pkexec").write_text("#!/bin/sh\nexec /usr/bin/python3 -I -B \"$@\"\n")
+    (fb / "busctl").write_text(FAKE_BUSCTL)
+    for f in fb.iterdir():
+        f.chmod(0o755)
+    (private / "icons").mkdir()
+    return {"SUMI_SDDM_HELPER": str(REPO / "system" / "sumi-sddm-helper"), "SUMI_SDDM_PKEXEC": str(fb / "pkexec"),
+            "SUMI_SDDM_HELPER_ROOT": str(root), "SUMI_SDDM_HELPER_PROBE": str(fb / "greeter"),
+            "SUMI_SDDM_BUSCTL_TEST": str(fb / "busctl"), "FAKE_ACCOUNTS_STATE": str(private / "accounts.json"),
+            "FAKE_ACCOUNTS_ICONS": str(private / "icons")}
 
 
 def run(tree: Path, out: Path, scenario: str, cli: str | None, reload_from: Path | None = None,
@@ -72,11 +129,11 @@ def run(tree: Path, out: Path, scenario: str, cli: str | None, reload_from: Path
         bindir = private / "bin"
         bindir.mkdir()
         if scenario in ("real", "terminal"):
-            real = cli or shutil.which("sumi-sddm")
-            if not real:
-                raise SystemExit("review.py: no hay sumi-sddm para el escenario " + scenario)
-            (bindir / "sumi-sddm").write_text(f"#!/bin/sh\nexec {json.dumps(str(Path(real).resolve()))} \"$@\"\n")
+            real = cli or str(REPO / "tools" / "sumi-sddm")
+            (bindir / "sumi-sddm").write_text(f"#!/bin/sh\nexec /usr/bin/python3 -B {json.dumps(str(Path(real).resolve()))}"
+                                              " \"$@\"\n")
             (bindir / "sumi-sddm").chmod(0o755)
+            env.update(fake_system(private))
         elif scenario == "incompatible":
             (bindir / "sumi-sddm").write_text('#!/bin/sh\necho \'{"ok": true, "api": 2, "version": "9.0.0"}\'\n')
             (bindir / "sumi-sddm").chmod(0o755)
@@ -115,6 +172,8 @@ def run(tree: Path, out: Path, scenario: str, cli: str | None, reload_from: Path
         report["settingsJsonUntouched"] = "sddm" not in shell_settings.lower()
         conf = private / "config/sumi-sddm/theme.conf.user"
         report["sddmConf"] = conf.read_text() if conf.exists() else None
+        sysconf = private / "sysroot/etc/sddm.conf"
+        report["fakeSddmConf"] = sysconf.read_text() if sysconf.exists() else None
         (out / f"{scenario}.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         return report
 

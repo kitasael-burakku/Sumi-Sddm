@@ -8,6 +8,11 @@
                                          la recarga; si algo falla, revierte solo
     deliver.py rollback --bundle DIR [--apply]
 
+    --work DIR   directorio privado de la entrega (por defecto, el de la primera). Contiene base-live/ y
+                 base-source/ (lo que hay ahora, con hash) y, si existe, origin/: los archivos ANTES de cualquier
+                 integración, sobre los que edit.py construye el candidato. Así una entrega posterior (p. ej. la de
+                 la Fase 5) sustituye lo entregado antes por la versión completa nueva, sin parches encadenados.
+
 Reglas (docs/PROCEDIMIENTOS.md de Quickshell): sólo las rutas del manifiesto; cada destino debe tener EXACTAMENTE
 el hash de la base (si no, no se escribe nada); respaldo de todo antes de la primera escritura; escritura atómica;
 diario; la vuelta atrás se niega si alguien editó después. `--apply` exige autorización específica de esta entrega.
@@ -33,7 +38,7 @@ if not __debug__:
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
 HOME = Path.home()
-PRIVATE = HOME / "Projects/Quickshell/.sddm-settings-20261122"
+PRIVATE = HOME / "Projects/Quickshell/.sddm-settings-20261122"     # se cambia con --work
 TREES = {"source": HOME / "Projects/dotfiles/quickshell/sumi", "live": HOME / ".config/quickshell/sumi"}
 SETTINGS_JSON = HOME / ".config/sumi-shell/settings.json"
 TAG = "sumi-sddm-settings-20261122"
@@ -58,7 +63,7 @@ def manifest() -> dict:
 
 
 def build_candidate(base: Path, out: Path) -> None:
-    """Candidato = sólo las rutas del manifiesto, desde la base, con edit.py."""
+    """Candidato = sólo las rutas del manifiesto, desde el origen (sin integración), con edit.py."""
     for rel in edit.EDITS:
         (out / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(base / rel, out / rel)
@@ -74,17 +79,26 @@ def build_candidate(base: Path, out: Path) -> None:
 
 def prepare() -> None:
     bases = {tag: PRIVATE / f"base-{tag}" for tag in TREES}
-    for rel in edit.EDITS:
+    for rel in PATHS:
         hs = {tag: digest(b / rel) for tag, b in bases.items()}
-        assert len(set(hs.values())) == 1 and None not in hs.values(), f"Las bases difieren o faltan: {rel} {hs}"
+        assert len(set(hs.values())) == 1, f"Las bases difieren: {rel} {hs}"
+    for rel in edit.EDITS:
+        assert digest(bases["live"] / rel) is not None, f"Falta en la base: {rel}"
+    origin = PRIVATE / "origin" if (PRIVATE / "origin").is_dir() else bases["live"]
     cand = PRIVATE / "deliver-candidate"
     if cand.exists():
         assert cand.resolve().is_relative_to(PRIVATE.resolve())
         shutil.rmtree(cand)
-    build_candidate(bases["live"], cand)
+    build_candidate(origin, cand)
     files = {rel: {"base": digest(bases["live"] / rel), "candidate": digest(cand / rel)} for rel in PATHS}
+    # sólo lo que cambia: una ruta igual en base y candidato no es parte de la entrega
+    same = sorted(rel for rel, r in files.items() if r["base"] == r["candidate"])
+    files = {rel: r for rel, r in files.items() if r["base"] != r["candidate"]}
+    if same:
+        print("sin cambios (fuera del manifiesto): " + ", ".join(same))
     (PRIVATE / "manifest.json").write_text(json.dumps({"format": 1, "files": files}, indent=2) + "\n")
-    print(f"manifiesto: {len(files)} rutas ({len(edit.NEW_FILES)} nuevas) → {PRIVATE / 'manifest.json'}")
+    new = sum(1 for r in files.values() if r["base"] is None)
+    print(f"manifiesto: {len(files)} rutas ({new} nuevas) → {PRIVATE / 'manifest.json'}")
 
 
 def check(trees: dict, want: str | None = None) -> list:
@@ -187,6 +201,7 @@ def self_test() -> None:
                 if row["base"] is not None:
                     (tree / rel).parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(PRIVATE / f"base-{tag}" / rel, tree / rel)
+        # rutas sin cambios en esta entrega: el self-test sólo mira las del manifiesto
         cand = PRIVATE / "deliver-candidate"
         apply(trees, cand, temp / "backup")
         check(trees, "candidate")
@@ -334,7 +349,13 @@ def main() -> int:
     ap.add_argument("action", choices=["prepare", "check", "self-test", "apply", "rollback"])
     ap.add_argument("--apply", action="store_true", help="escribir de verdad (autorización de esta entrega)")
     ap.add_argument("--bundle", type=Path)
+    ap.add_argument("--work", type=Path, help="directorio privado de la entrega")
     a = ap.parse_args()
+    global PRIVATE, TAG
+    if a.work:
+        PRIVATE = a.work.resolve()
+        assert PRIVATE.is_relative_to(HOME / "Projects/Quickshell"), "--work va dentro de ~/Projects/Quickshell"
+        TAG = "sumi-sddm-" + PRIVATE.name.lstrip(".")
     if a.action == "prepare":
         prepare()
         return 0

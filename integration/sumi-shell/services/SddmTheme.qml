@@ -10,8 +10,13 @@ import Quickshell.Io
  * La configuración es de Sumi SDDM, no de la shell (un dueño por dato): vive en ~/.config/sumi-sddm y NO entra en
  * settings.json, presets ni Export/Import. Aquí sólo se pide y se enseña; todo lo hace la orden `sumi-sddm` del
  * PATH (contrato JSON api 1, docs/CLI-JSON.md de Sumi SDDM), con verbos fijos y `argv` (nunca un shell). La CLI
- * vuelve a validar todo con su lectura estricta. Nada de esto toca el sistema: llevarlo a la pantalla de inicio de
- * sesión real es trabajo de un helper aparte con pkexec, que aún no existe.
+ * vuelve a validar todo con su lectura estricta.
+ *
+ * Sistema (Fase 5 de Sumi SDDM): `system status` dice si el tema está instalado y activo y si lo aplicado coincide
+ * con lo guardado. Apply / Use / Restore lanzan `sumi-sddm system apply|activate|deactivate`, que pasan por pkexec:
+ * la contraseña la pide el agente de polkit (el de la shell). Corren en su propio proceso para que esperar la
+ * contraseña no bloquee la cola. Use y Restore piden dos pulsaciones.
+ * Avatar: `sumi-sddm avatar info|set|clear` (AccountsService; sin contraseña).
  *
  *   claim()      con la página a la vista se carga (versión → esquema → valores) y vive la vista previa; cerrada,
  *                no corre nada
@@ -46,6 +51,15 @@ Singleton {
     readonly property bool busy: root._running !== null || root._queue.length > 0 || writeTimer.running
     readonly property int customCount: root.order.filter(k => root.values[k] && root.values[k].set).length
 
+    // ---- sistema y avatar --------------------------------------------------------------------------------------
+    /** `system status` (null mientras no se sabe): installed, active, activeTheme, inSync, version; missing si no
+     *  está el paquete. */
+    property var system: null
+    /** "" · apply · activate · deactivate: una operación con pkexec en marcha (esperando la contraseña o haciéndola). */
+    property string systemBusy: ""
+    /** `avatar info` (null si no se sabe): iconFile, exists, sddmUses… */
+    property var avatar: null
+
     // ---- quién mira ---------------------------------------------------------------------------------------------
     property var claims: ({})
     readonly property bool watching: Object.keys(root.claims).length > 0
@@ -57,15 +71,16 @@ Singleton {
     }
     onWatchingChanged: {
         if (root.watching) root.load();
-        else { root.tryArmed = false; root.resetArmed = false; }
+        else { root.tryArmed = false; root.resetArmed = false; root.activateArmed = false; root.deactivateArmed = false; }
     }
 
     // ---- cola de procesos ----------------------------------------------------------------------------------------
     property var _queue: []
     property var _running: null
     function _enqueue(job) {
-        // una carga o una vista previa ya en cola no se repite
-        if ((job.kind === "show" || job.kind === "preview") && root._queue.some(j => j.kind === job.kind)) return;
+        // una carga, una vista previa o un estado ya en cola no se repite
+        if (["show", "preview", "system", "avatar"].indexOf(job.kind) >= 0 && root._queue.some(j => j.kind === job.kind))
+            return;
         root._queue = root._queue.concat([job]);
         root._pump();
     }
@@ -155,13 +170,115 @@ Singleton {
             root.warnings = doc.warnings || [];
             root.status = "ready";
             root.schedulePreview();
+            root.refreshSystem();
+            if (root.avatar === null) root.refreshAvatar();
         } });
+    }
+
+    function refreshSystem() {
+        root._enqueue({ kind: "system", args: ["system", "status"], done: (doc) => {
+            if (doc && doc.ok === true) root.system = doc;
+            else root.system = { installed: false, missing: !!(doc && doc.code === "missing"),
+                                 error: doc && doc.error ? String(doc.error) : "" };
+        } });
+    }
+    function refreshAvatar() {
+        root._enqueue({ kind: "avatar", args: ["avatar", "info"], done: (doc) => {
+            root.avatar = doc && doc.ok === true ? doc : { exists: false, error: doc && doc.error ? String(doc.error) : "" };
+        } });
+    }
+    function setAvatar(path) {
+        const p = String(path || "").trim().replace(/^~(?=\/)/, Quickshell.env("HOME") || "~");
+        if (!root.ready || p.length === 0) return;
+        root.error = ""; root.notice = "";
+        root._enqueue({ kind: "avatarSet", args: ["avatar", "set", p], done: (doc) => {
+            if (doc && doc.ok === true) { root.avatar = doc; root.notice = "Avatar saved"; root.schedulePreview(); }
+            else { root.error = doc && doc.error ? String(doc.error) : "The avatar could not be saved"; root.refreshAvatar(); }
+        } });
+    }
+    function clearAvatar() {
+        if (!root.ready) return;
+        root._enqueue({ kind: "avatarSet", args: ["avatar", "clear"], done: (doc) => {
+            if (!(doc && doc.ok === true)) root.error = doc && doc.error ? String(doc.error) : "The avatar could not be removed";
+            root.refreshAvatar();
+            root.schedulePreview();
+        } });
+    }
+
+    // ---- operaciones con pkexec (su propio proceso) ---------------------------------------------------------------
+    property bool activateArmed: false
+    property bool deactivateArmed: false
+    function systemApply() {
+        if (!root.ready || root.systemBusy !== "" || !root.system || root.system.installed !== true) return;
+        // lo pendiente de escribir va antes: se aplica lo que se ve
+        if (Object.keys(root._pending).length > 0 || writeTimer.running || root._running !== null) {
+            applyRetry.restart();
+            return;
+        }
+        root._system("apply");
+    }
+    Timer { id: applyRetry; interval: 250; onTriggered: root.systemApply() }
+    function activateSystem() {
+        if (!root.ready || root.systemBusy !== "" || !root.system || root.system.installed !== true || root.system.active) return;
+        if (!root.activateArmed) { root.activateArmed = true; disarm.restart(); return; }
+        root.activateArmed = false;
+        root._system("activate");
+    }
+    function deactivateSystem() {
+        if (!root.ready || root.systemBusy !== "" || !root.system || root.system.active !== true) return;
+        if (!root.deactivateArmed) { root.deactivateArmed = true; disarm.restart(); return; }
+        root.deactivateArmed = false;
+        root._system("deactivate");
+    }
+    function _system(verb) {
+        root.error = ""; root.notice = "";
+        root.systemBusy = verb;
+        sysProc.command = root.launcher.concat(["system", verb, "--json"]);
+        sysProc.running = true;
+    }
+    Process {
+        id: sysProc
+        property string out: ""
+        property bool gotOut: false
+        property bool exited: false
+        onStarted: { sysProc.gotOut = false; sysProc.exited = false; }
+        stdout: StdioCollector { onStreamFinished: { sysProc.out = this.text; sysProc.gotOut = true; root._systemDone(); } }
+        onExited: { sysProc.exited = true; root._systemDone(); }
+    }
+    function _systemDone() {
+        if (!sysProc.gotOut || !sysProc.exited) return;
+        sysProc.gotOut = false; sysProc.exited = false;
+        const verb = root.systemBusy;
+        root.systemBusy = "";
+        let doc = null;
+        try { doc = JSON.parse(String(sysProc.out).trim()); } catch (e) { doc = null; }
+        if (doc && doc.ok === true) {
+            root.notice = verb === "apply" ? (doc.changed ? "Applied to the login screen" : "The login screen already had these settings")
+                : verb === "activate" ? "Sumi will be your login screen the next time it appears"
+                : "Back to " + String(doc.activeTheme || "the previous theme") + " the next time the login screen appears";
+        } else if (doc && doc.code === "denied") {
+            root.notice = "Authentication cancelled · nothing changed";
+        } else if (doc && doc.code === "probe") {
+            const first = (doc.problems || [])[0];
+            root.error = "The theme failed its test with these settings · nothing changed" + (first ? " · " + String(first) : "");
+        } else {
+            root.error = doc && doc.error ? String(doc.error) : "sumi-sddm could not change the login screen";
+        }
+        root.refreshSystem();
     }
 
     // ---- escribir --------------------------------------------------------------------------------------------------
     property var _pending: ({})              // clave → {value, raw}; raw "" = quitar
-    function valueOf(key) { const v = root.values[key]; return v ? v.value : undefined; }
-    function isSet(key) { const v = root.values[key]; return !!(v && v.set); }
+    function valueOf(key) {
+        if (key === "avatar") return root.avatar && root.avatar.exists ? String(root.avatar.iconFile) : "";
+        const v = root.values[key];
+        return v ? v.value : undefined;
+    }
+    function isSet(key) {
+        if (key === "avatar") return !!(root.avatar && root.avatar.exists);
+        const v = root.values[key];
+        return !!(v && v.set);
+    }
 
     /** Cambio de una clave. `value` en el tipo del esquema; null = volver al valor por defecto. */
     function set(key, value) {
@@ -180,7 +297,7 @@ Singleton {
         root.notice = "";
         writeTimer.restart();
     }
-    function unset(key) { root.set(key, null); }
+    function unset(key) { if (key === "avatar") root.clearAvatar(); else root.set(key, null); }
     function _raw(e, value) {
         if (e.type === "bool") return value ? "true" : "false";
         if (e.type === "integer") return String(Math.round(value));
@@ -205,7 +322,7 @@ Singleton {
         if (doc && doc.ok === true) {
             root.writeCount++;
             root.stamp = String(doc.stamp || root.stamp);
-            root.reload();
+            root.reload();          // y, tras ella, `system status`: lo aplicado deja de coincidir
             return;
         }
         // Lo enviado no se guardó: lo pendiente posterior tampoco vale si la base cambió.
@@ -252,7 +369,10 @@ Singleton {
         root.tryArmed = false;
         Quickshell.execDetached(root.launcher.concat(["try", "--yes"]));
     }
-    Timer { id: disarm; interval: 4000; onTriggered: { root.resetArmed = false; root.tryArmed = false; } }
+    Timer {
+        id: disarm; interval: 4000
+        onTriggered: { root.resetArmed = false; root.tryArmed = false; root.activateArmed = false; root.deactivateArmed = false; }
+    }
 
     // ---- vista previa ----------------------------------------------------------------------------------------------
     readonly property var scenarios: [
@@ -292,13 +412,24 @@ Singleton {
     /** Filas de un grupo del esquema (kind «sddm»: las pinta components/SddmField). */
     function rows(group) {
         if (!root.ready) return [];
-        return root.order.filter(k => root.keys[k].group === group).map(k => {
+        const rows = root.order.filter(k => root.keys[k].group === group).map(k => {
             const e = root.keys[k];
             return { id: "sddm:" + k, prop: "", kind: "sddm", key: k, name: String(e.label || k),
                      caption: root.captionFor(k) };
         });
+        // el avatar no es una clave del tema (es de AccountsService): primera fila de Users, pie dinámico
+        if (group === "users")
+            rows.unshift({ id: "sddm:avatar", prop: "", kind: "sddm", key: "avatar", name: "Avatar" });
+        return rows;
     }
     function captionFor(key) {
+        if (key === "avatar") {
+            const a = root.avatar;
+            if (!a) return "";
+            if (a.error) return String(a.error);
+            if (!a.exists) return "Type the path of a picture · without one, your initials are shown";
+            return a.sddmUses ? "Shown on the login screen · cropped to a circle" : "Saved, but the login screen can't read it";
+        }
         const w = root.warnings.find(x => x.key === key);
         if (w) return String(w.message);
         const e = root.keys[key];

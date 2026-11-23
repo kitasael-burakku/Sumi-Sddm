@@ -26,11 +26,14 @@ GROUP_TITLES = [("background", "Background"), ("colors", "Colors"), ("typography
                 ("behaviour", "Behaviour")]
 
 PAGE = '''            // Sumi SDDM (2026-11-22): la pantalla de inicio de sesión. Los valores son de Sumi SDDM (services/SddmTheme,
-            // orden `sumi-sddm`), no de settings.json: esta página enseña y pide; nada de aquí toca el sistema.
+            // orden `sumi-sddm`), no de settings.json. Apply / Use / Restore pasan por pkexec (contraseña cada vez).
             { id: "sddm", title: "Login screen", sections: [
                 { title: "Login screen", key: "", rows: [
                     { id: "sddmStatus", prop: "", kind: "info", name: "Sumi SDDM" },
-                    { id: "sddmApplied", prop: "", kind: "info", name: "On the login screen" }
+                    { id: "sddmApplied", prop: "", kind: "info", name: "On the login screen" },
+                    { id: "sddmApply", prop: "", kind: "action", name: "Apply to the login screen", label: "Apply" },
+                    { id: "sddmActivate", prop: "", kind: "action", name: "Use as the login screen", label: "Use" },
+                    { id: "sddmDeactivate", prop: "", kind: "action", name: "Restore the previous login screen", label: "Restore" }
                 ] },
                 { title: "Preview", key: "", dynamic: "sddm:preview", rows: [] },
 ''' + "".join(f'                {{ title: "{t}", key: "", dynamic: "sddm:{g}", rows: [] }},\n' for g, t in GROUP_TITLES) + '''                { title: "Changes", key: "", rows: [
@@ -71,7 +74,13 @@ SETTINGS_FUNCS = '''
             default: return "Checking…";
             }
         }
-        if (id === "sddmApplied") return SddmTheme.ready ? "Not installed yet" : "";
+        if (id === "sddmApplied") {
+            const sy = SddmTheme.system;
+            if (!SddmTheme.ready) return "";
+            if (!sy) return "Checking…";
+            if (sy.installed !== true) return "Not installed";
+            return sy.active ? "In use" : "Installed, not in use";
+        }
         return "";
     }
     function sddmCaption(r) {
@@ -82,7 +91,20 @@ SETTINGS_FUNCS = '''
             if (SddmTheme.error.length > 0) return SddmTheme.error;
             if (SddmTheme.notice.length > 0) return SddmTheme.notice;
             return SddmTheme.busy ? "Saving…" : "Changes are saved for Sumi SDDM as you make them";
-        case "sddmApplied": return "Your choices are kept in ~/.config/sumi-sddm; installing the theme on the system is a separate step";
+        case "sddmApplied": {
+            const sy = SddmTheme.system;
+            if (SddmTheme.systemBusy !== "") return "Waiting for your password…";
+            if (!sy) return "";
+            if (sy.installed !== true)
+                return "Install the sumi-sddm package (packaging/arch in Sumi SDDM) to use it as your login screen";
+            if (!sy.inSync) return "Your latest changes aren't on the login screen yet · Apply them below";
+            return sy.active ? "Shows your current settings" : "Has your current settings · Use it to make it your login screen";
+        }
+        case "sddmApply": return "Copies your settings and wallpaper into the installed theme · asks for your password";
+        case "sddmActivate": return SddmTheme.activateArmed ? "Press again · it will be used the next time the login screen appears"
+                                                            : "Makes Sumi your login screen · asks for your password, nothing restarts";
+        case "sddmDeactivate": return SddmTheme.deactivateArmed ? "Press again to go back to the previous theme"
+                                                                : "Goes back to the theme you had before Sumi";
         case "sddmTry": return SddmTheme.tryArmed ? "Press again to open · it takes the keyboard until you close it"
                                                   : "The real login screen in a window, without logging in";
         case "sddmReset": return SddmTheme.resetArmed ? "Press again to reset " + SddmTheme.customCount + " settings"
@@ -95,12 +117,24 @@ SETTINGS_FUNCS = '''
         if (r.id === "sddmStatus" || r.id === "sddmApplied" || /Empty$/.test(r.id)) return "";
         if (!SddmTheme.ready) return SddmTheme.status === "checking" || SddmTheme.status === "" ? "Checking…" : "Sumi SDDM is not available";
         if (r.id === "sddmReset" && SddmTheme.customCount === 0) return "Everything is at its default";
+        if (r.id === "sddmApply" || r.id === "sddmActivate" || r.id === "sddmDeactivate") {
+            const sy = SddmTheme.system;
+            if (SddmTheme.systemBusy !== "") return "Waiting for your password…";
+            if (!sy) return "Checking…";
+            if (sy.installed !== true) return "Sumi SDDM is not installed on the system";
+            if (r.id === "sddmApply" && sy.inSync) return "The login screen already has your settings";
+            if (r.id === "sddmActivate" && sy.active) return "Already your login screen";
+            if (r.id === "sddmDeactivate" && !sy.active) return "Sumi isn't your login screen";
+        }
         return "";
     }
     function sddmAction(id) {
         if (id === "sddmTry") SddmTheme.openTestWindow();
         if (id === "sddmReset") SddmTheme.resetAll();
         if (id === "sddmRestore") SddmTheme.restorePrevious();
+        if (id === "sddmApply") SddmTheme.systemApply();
+        if (id === "sddmActivate") SddmTheme.activateSystem();
+        if (id === "sddmDeactivate") SddmTheme.deactivateSystem();
     }
 '''
 

@@ -59,6 +59,16 @@ function cases(w, sddm, settings) {
         test(sddm.customCount === 0 && sddm.stamp.length === 32, "configuración vacía con huella");
         test(p.infoValue({ id: "sddmStatus" }).indexOf("Version ") === 0, "estado con versión");
     });
+    step("estado del sistema (falso)", () => {
+        if (sddm.system === null || sddm.avatar === null) return false;
+        test(sddm.system.installed === true && sddm.system.active === false, "instalado y no activo");
+        test(p.infoValue({ id: "sddmApplied" }) === "Installed, not in use", "fila: " + p.infoValue({ id: "sddmApplied" }));
+        test(sddm.system.inSync === true, "sin configuración, nada que aplicar");
+        test(p.rowReason({ id: "sddmApply", kind: "action" }) === "The login screen already has your settings", "Apply desactivado");
+        test(p.rowReason({ id: "sddmActivate", kind: "action" }) === "", "Use disponible");
+        test(p.rowReason({ id: "sddmDeactivate", kind: "action" }) === "Sumi isn't your login screen", "Restore desactivado");
+        test(sddm.avatar.exists === false, "sin avatar");
+    });
     shots(w.scenario);
     if (w.scenario !== "real") {
         step("cerrar", () => { test(p.openPath("shell/general") && !sddm.watching, "soltar al salir"); });
@@ -165,6 +175,65 @@ function cases(w, sddm, settings) {
     step("reset hecho", () => { if (!idle()) return false; test(sddm.customCount === 0, "todo al defecto"); });
     step("restore", () => { p.runAction("sddmRestore"); });
     step("restore hecho", () => { if (!idle()) return false; test(sddm.customCount === before, "vuelve lo de antes"); });
+
+    // ── el sistema (falso): aplicar, usar y restaurar, sin pkexec real ──
+    step("hay algo que aplicar", () => {
+        if (!idle() || sddm.system === null) return false;
+        test(sddm.system.inSync === false, "tras los cambios, lo aplicado ya no coincide");
+        test(p.captionOf({ id: "sddmApplied" }).indexOf("aren't on the login screen yet") >= 0, "el pie lo dice");
+        test(p.rowReason({ id: "sddmApply", kind: "action" }) === "", "Apply disponible");
+        p.runAction("sddmApply");
+        test(sddm.systemBusy === "apply", "Apply en marcha (esperaría la contraseña)");
+        test(p.rowReason({ id: "sddmActivate", kind: "action" }) === "Waiting for your password…", "lo demás espera");
+    });
+    step("aplicado", () => {
+        if (sddm.systemBusy !== "" || !idle()) return false;
+        test(sddm.notice === "Applied to the login screen", "aviso: " + sddm.notice + " / " + sddm.error);
+    });
+    step("estado tras aplicar", () => {
+        if (!idle() || !sddm.system || sddm.system.inSync !== true) return false;
+        test(p.captionOf({ id: "sddmApplied" }) === "Has your current settings · Use it to make it your login screen", "pie tras aplicar");
+    });
+    step("Use armado", () => {
+        p.runAction("sddmActivate");
+        test(sddm.activateArmed && sddm.systemBusy === "", "la primera pulsación sólo arma");
+        test(p.captionOf({ id: "sddmActivate" }).indexOf("Press again") === 0, "lo pide");
+    });
+    step("Use", () => { p.runAction("sddmActivate"); test(sddm.systemBusy === "activate", "activando"); });
+    step("en uso", () => {
+        if (sddm.systemBusy !== "" || !idle() || !sddm.system || !sddm.system.active) return false;
+        test(p.infoValue({ id: "sddmApplied" }) === "In use", "fila: en uso");
+        test(sddm.notice.indexOf("Sumi will be your login screen") === 0, "aviso de activación");
+        test(p.rowReason({ id: "sddmActivate", kind: "action" }) === "Already your login screen", "Use ya no se ofrece");
+    });
+    step("captura Overview en uso", () => { test(p.selectTab("Overview"), "Overview"); });
+    step("captura en uso", () => { if (sddm.previewStale) return false; w.shot("real-overview-in-use.png"); }, 30000);
+    step("Restore", () => { p.runAction("sddmDeactivate"); p.runAction("sddmDeactivate"); test(sddm.systemBusy === "deactivate", "restaurando"); });
+    step("restaurado", () => {
+        if (sddm.systemBusy !== "" || !idle() || !sddm.system || sddm.system.active) return false;
+        test(sddm.notice.indexOf("Back to orbital") === 0, "aviso: " + sddm.notice);
+        test(p.infoValue({ id: "sddmApplied" }) === "Installed, not in use", "otra vez sin usar");
+    });
+
+    // ── avatar (AccountsService falso) ──
+    step("pestaña Users and power", () => { test(p.selectTab("Users and power"), "pestaña"); });
+    step("fila del avatar", () => {
+        const row = p.rowItems["sddm:avatar"];
+        test(!!row && row.custom === false, "fila Avatar sin personalizar");
+        test(p.captionOf({ id: "sddm:avatar", key: "avatar" }).indexOf("your initials are shown") > 0, "pie sin avatar");
+        sddm.setAvatar(w.home + "/pic.png");
+    });
+    step("avatar puesto", () => {
+        if (!idle() || !sddm.avatar || !sddm.avatar.exists) return false;
+        test(p.rowItems["sddm:avatar"].custom === true, "la fila se marca");
+        test(sddm.notice === "Avatar saved", "aviso: " + sddm.notice + " / " + sddm.error);
+    });
+    step("captura con avatar", () => { w.shot("real-users-avatar.png"); });
+    step("quitar avatar", () => { p.rowItems["sddm:avatar"].resetRequested(); });
+    step("avatar quitado", () => {
+        if (!idle() || !sddm.avatar || sddm.avatar.exists) return false;
+        test(p.rowItems["sddm:avatar"].custom === false, "fila sin marca");
+    });
 
     // ── la ventana de prueba: sólo se arma (abrirla tomaría el teclado) ──
     step("test window armado", () => {

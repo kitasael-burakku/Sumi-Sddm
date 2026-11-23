@@ -160,3 +160,48 @@ Con el diálogo de polkit de la shell:
     el código anterior.
   - **Versión.** Sube a **0.4.1**: el tema instalado (0.4.0) aún no lleva el arreglo y hay que reinstalar el
     paquete.
+
+## Parte C — Settings → Login screen: aplicar, usar, restaurar y avatar (preparada, sin entregar)
+
+Pedida por el autor el 2026-11-22. Fuentes en `integration/sumi-shell/`. Trabajo privado en
+`~/Projects/Quickshell/.sddm-settings-c-20261122/`.
+
+- **Bases tomadas justo antes.** Las 10 rutas de la Fase 4 en el vivo y en la fuente son **idénticas** al
+  candidato que se entregó entonces, así que el candidato nuevo se construye desde los archivos de **antes** de
+  cualquier integración (`origin/`) con el `edit.py` completo. No hay parches encadenados.
+- **Rutas que cambian:** sólo 3 (`surfaces/Settings.qml`, `services/SddmTheme.qml`, `components/SddmField.qml`).
+  `deliver.py --work` deja fuera del manifiesto las que no cambian.
+
+**Lo que añade:**
+- **Overview.**
+  - «On the login screen» dice *Not installed / Installed, not in use / In use* y, en el pie, si lo aplicado
+    coincide con lo guardado.
+  - Tres acciones nuevas:
+
+    | Acción | Orden | Pulsaciones |
+    |---|---|---|
+    | «Apply to the login screen» | `system apply` | una |
+    | «Use as the login screen» | `system activate` | dos |
+    | «Restore the previous login screen» | `system deactivate` | dos |
+
+  - Las tres pasan por pkexec, en un proceso aparte, para que esperar la contraseña no bloquee los demás cambios.
+  - Mientras tanto, todas dicen «Waiting for your password…».
+  - Cancelar → «Authentication cancelled · nothing changed». Prueba previa fallida → el error y su primer problema.
+- **Users.** Primera fila «Avatar»: el `PathField` redondo de Settings (como el del Lock), «Remove», marca de
+  personalizado y restablecer. Por `sumi-sddm avatar set|clear`, sin contraseña.
+
+**Pruebas:**
+
+| Prueba | Resultado |
+|---|---|
+| `deliver.py --work … prepare / check / self-test / apply` en seco | 3 rutas × 2 árboles en base; entrega y vuelta atrás correctas; la entrega de la Fase 4 sigue intacta |
+| Banco `real`: los 48 pasos de antes, más estado del sistema, Apply (`inSync` cambia), Use con dos pulsaciones (`In use`), Restore (vuelve a `orbital`), avatar puesto y quitado | 78/78, 0 avisos QML |
+| ↳ El sistema es falso | raíz privada con el tema «instalado», pkexec falso que ejecuta el helper del repositorio sobre ella, greeter falso y AccountsService falso. El `/etc/sddm.conf` falso termina en `Current=orbital` |
+| `missing` / `incompatible` / `terminal` | 12/12, 12/12, 20/20 |
+| Recarga en caliente desde el estado actual de la sesión (Fase 4) → 3 rutas | 2 cargas, 78/78, 0 avisos |
+| Lo que se entregaría frente a lo probado | idéntico byte a byte |
+
+**Límites:**
+- **Miniatura del avatar.** En el banco no se ve, porque `PathField` usa MultiEffect y el banco usa el
+  renderizador software. En la sesión sí se dibuja, como la del Lock.
+- **Contraseña.** El diálogo real de polkit desde Settings sólo se verá en la sesión: en el banco, pkexec es falso.

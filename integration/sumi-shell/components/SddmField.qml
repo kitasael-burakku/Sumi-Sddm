@@ -10,6 +10,7 @@ import "../services"
  *
  *   bool → Toggle · enum → Choice · number/integer → Slider + valor · color → muestra + campo hex
  *   string → campo de texto · path (el fondo) → campo de ruta; Esc dentro del campo cancela, «Remove» lo quita
+ *   avatar (no es del tema: AccountsService) → el PathField redondo de Settings, como el avatar del Lock
  *
  * Aquí no se valida nada en serio: la CLI valida con su lectura estricta y, si rechaza, SddmTheme lo dice y
  * vuelve a enseñar lo guardado. Este archivo sólo evita enviar lo que a todas luces no vale (un hex mal escrito).
@@ -24,10 +25,11 @@ Item {
     /** Terminó la edición de un campo de texto: Settings recupera el teclado. */
     signal finished()
 
-    readonly property var entry: SddmTheme.keys[root.key] || ({ type: "", label: "" })
+    readonly property var entry: SddmTheme.keys[root.key] || ({ type: "", label: root.key === "avatar" ? "Avatar" : "" })
     readonly property var value: SddmTheme.valueOf(root.key)
-    readonly property string type: String(root.entry.type || "")
+    readonly property string type: root.key === "avatar" ? "avatar" : String(root.entry.type || "")
     readonly property bool textual: root.type === "string" || root.type === "color" || root.type === "path"
+                                    || root.type === "avatar"
 
     /** Enter / ←/→ desde la fila (Settings.adjust). */
     function activate(dir) {
@@ -48,7 +50,8 @@ Item {
             : root.type === "number" || root.type === "integer" ? numberC
             : root.type === "color" ? colorC
             : root.type === "path" ? pathC
-            : root.type === "string" ? textC : null
+            : root.type === "string" ? textC
+            : root.type === "avatar" ? avatarC : null
     }
 
     Component {
@@ -186,6 +189,36 @@ Item {
                 s: root.s
                 label: "Remove"
                 onTriggered: SddmTheme.clearWallpaper()
+            }
+        }
+    }
+    Component {
+        id: avatarC
+        Row {
+            spacing: 8 * root.s
+            function startEdit() { face.startEdit(); }
+            PathField {
+                id: face
+                anchors.verticalCenter: parent.verticalCenter
+                s: root.s
+                round: true
+                value: String(root.value || "")
+                placeholder: ""
+                fallbackNote: "the login screen shows your initials"
+                // vacío = quitar; el mismo archivo = nada que hacer
+                onCommitted: (text) => {
+                    const t = String(text || "").trim();
+                    if (t.length === 0) SddmTheme.clearAvatar();
+                    else if (t !== String(root.value || "")) SddmTheme.setAvatar(t);
+                    root.finished();
+                }
+            }
+            ActionButton {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: SddmTheme.isSet("avatar")
+                s: root.s
+                label: "Remove"
+                onTriggered: SddmTheme.clearAvatar()
             }
         }
     }
