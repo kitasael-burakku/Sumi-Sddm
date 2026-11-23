@@ -100,5 +100,5 @@ En `--test-mode` no hay daemon: no se autentica ni se apaga de verdad.
 
 ## Licencias
 
-Inter: SIL OFL 1.1 (`theme/sumi/assets/fonts/OFL.txt`). El proyecto será MIT: el autor lo decidió el 2026-11-22
-y el archivo de licencia se añadirá al publicarlo, junto con Sumi Shell. Iconos y fondo: dibujados en el propio QML del tema.
+Sumi SDDM se distribuye bajo la licencia MIT (`LICENSE`). Inter: SIL OFL 1.1 (`theme/sumi/assets/fonts/OFL.txt`).
+Iconos y fondo: dibujados en el propio QML del tema.

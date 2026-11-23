@@ -19,8 +19,9 @@ class PackagingTest(unittest.TestCase):
 
     def test_license_files_exist(self):
         text = (ROOT / "packaging" / "arch" / "PKGBUILD").read_text()
-        self.assertIn("LICENSE-PENDING", text)
-        self.assertTrue((ROOT / "LICENSE-PENDING").is_file())
+        self.assertIn('"$src/LICENSE"', text)
+        self.assertIn("license=('MIT' 'OFL-1.1')", text)
+        self.assertTrue((ROOT / "LICENSE").is_file())
 
 
 if __name__ == "__main__":
