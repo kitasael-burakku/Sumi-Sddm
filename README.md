@@ -24,6 +24,8 @@ tools/sumi-sddm            CLI (sin privilegios): config, wallpaper, preview, tr
 tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas,
                            huella y bloqueo (state.py), instalación de usuario (install.py)
 tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
+system/                    helper privilegiado (pkexec) y su acción de polkit
+packaging/arch/            PKGBUILD local (tema + helper + acción); no activa nada
 integration/sumi-shell/     Settings → Login screen para Sumi Shell (servicio, controles, edit.py, deliver.py, banco)
 tests/py/                  pruebas de sumiconf y de la CLI
 tests/qml/                 pruebas del Greeter y de la paridad de configuración (qmltestrunner)
@@ -44,6 +46,19 @@ tools/sumi-sddm wallpaper set ~/Imágenes/fondo.jpg               # valida y cop
 tools/sumi-sddm preview                           # PNG en ~/.cache/sumi-sddm/preview/
 tools/sumi-sddm try --yes                         # ventana --test-mode (toma el teclado)
 ```
+
+### En el sistema (Fase 5)
+
+```sh
+cd packaging/arch && makepkg                      # construir el paquete (sin root)
+sudo pacman -U sumi-sddm-*.pkg.tar.zst            # instalar: NO activa el tema
+tools/sumi-sddm system status                     # instalado, tema activo, ¿tu configuración aplicada?
+tools/sumi-sddm system apply                      # lleva tu configuración y wallpaper al tema (pide contraseña)
+tools/sumi-sddm system activate                   # Sumi será la pantalla de inicio la PRÓXIMA vez
+tools/sumi-sddm system deactivate                 # vuelve al tema anterior
+```
+
+Si algo sale mal en la pantalla de inicio: [docs/RECUPERACION.md](docs/RECUPERACION.md).
 
 Todas aceptan `--json`, con un contrato versionado para otros programas (Settings de Sumi Shell):
 [docs/CLI-JSON.md](docs/CLI-JSON.md). Las escrituras admiten `--expect HUELLA` para no pisar cambios ajenos.

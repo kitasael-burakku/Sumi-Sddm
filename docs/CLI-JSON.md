@@ -32,6 +32,8 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 | `render` | la vista previa no se pudo generar | enseñar `error` |
 | `unsupported` | orden de desarrollo en la copia instalada, o `install` fuera del repositorio | — |
 | `usage` | operación desconocida | — |
+| `denied` | `system …`: la autenticación de polkit se canceló o se denegó; no se cambió nada | volver a intentarlo si se quiere |
+| `probe` | `system …`: el tema no superó la prueba con el greeter real como `sddm`; no se cambió nada. Lleva `problems` | enseñar `error` y `problems` |
 
 ## Huella y concurrencia
 
@@ -68,6 +70,13 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 | `install --status --json` | `launcher`, `installed`, `release`, `foreign` |
 | `install --user --json` | `version`, `release`, `launcher`, `previous`, `removed` |
 | `uninstall --user --json` | `removed`, `kept` (la configuración, que no se borra) |
+
+| `system status --json` | `installed`, `version`, `activeTheme`, `decidedBy` (archivo que lo decide), `active`, `applied` ({archivo: sha256}), `inSync` (lo aplicado coincide con lo guardado), `stamp`, `previousTheme`, `lastChange` |
+| `system apply --json` | `changed`, `probe`, `applied`, `backup` (si cambió), `stamp` (de lo enviado) |
+| `system reset \| rollback \| activate \| deactivate [TEMA] \| probe --json` | `changed`, `backup`, y `activeTheme`/`previousTheme`/`probe`/`restored` según el verbo |
+
+Las órdenes `system` que cambian algo pasan por `pkexec /usr/lib/sumi-sddm/sumi-sddm-helper`, que pide la
+contraseña de un administrador cada vez (Fase 5). `system status` no necesita privilegios.
 
 `try --yes` no tiene JSON: abre una ventana y devuelve el código de salida del greeter.
 

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Sumi SDDM: la única acción privilegiada. pkexec sólo la concede para este programa exacto (exec.path), con la
+  contraseña de un administrador CADA VEZ, sólo desde una sesión local activa.
+-->
+<policyconfig>
+  <vendor>Sumi SDDM</vendor>
+  <action id="org.sumi.sddm.helper">
+    <description>Change the Sumi SDDM login screen</description>
+    <message>Authentication is required to change the login screen theme or its settings</message>
+    <icon_name>preferences-desktop-theme</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sumi-sddm/sumi-sddm-helper</annotate>
+  </action>
+</policyconfig>

@@ -1,0 +1,729 @@
+#!/usr/bin/python3 -IB
+"""sumi-sddm-helper — la única parte de Sumi SDDM que corre como root. Se lanza con pkexec (acción de polkit
+org.sumi.sddm.helper) o, para recuperar desde una TTY, con sudo.
+
+    sumi-sddm-helper status [--json]          sin root: tema instalado, tema activo, archivos aplicados
+    sumi-sddm-helper probe                    prueba el tema instalado como el usuario sddm (offscreen)
+    sumi-sddm-helper apply                    paquete por la ENTRADA ESTÁNDAR (lo prepara `sumi-sddm system apply`)
+    sumi-sddm-helper reset | rollback
+    sumi-sddm-helper activate                 [Theme] Current=sumi en /etc/sddm.conf (efecto: la PRÓXIMA pantalla)
+    sumi-sddm-helper deactivate [TEMA]        repone el tema anterior (o TEMA, si es uno instalado)
+
+Garantías (docs/FASE5-PLAN.md):
+- verbos fijos; ninguna ruta ni orden llega por argumentos; nunca abre archivos del usuario: lo suyo llega por stdin
+- revalida todo con la lectura estricta de sumiconf y comprueba las imágenes por su contenido
+- escribe sólo theme.conf.user y backgrounds/user.<ext> del tema, la clave [Theme] Current de /etc/sddm.conf y su
+  estado en /var/lib/sumi-sddm (0700); atómico, sin seguir enlaces, con respaldo previo y vuelta atrás
+- antes de tocar lo que verá el greeter, lo prueba como lo verá: una copia con el greeter real, como `sddm`
+- no reinicia SDDM, no toca PAM ni la autenticación; el registro no lleva valores de configuración
+- su propio código debe ser de root y no escribible por otros; si no, se niega a correr como root
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+import pwd
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from contextlib import contextmanager
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+os.umask(0o022)
+
+INSTALLED = Path("/usr/lib/sumi-sddm")
+HERE = Path(__file__).resolve().parent
+BASE = HERE if (HERE / "tools" / "sumiconf").is_dir() else HERE.parent
+IS_ROOT = os.geteuid() == 0
+API = 1
+
+# ── Modo de pruebas: sólo sin root. Como root, cualquier variable de prueba es un error. ──────────────────────────
+TEST_ROOT = os.environ.get("SUMI_SDDM_HELPER_ROOT", "")
+TEST_PROBE = os.environ.get("SUMI_SDDM_HELPER_PROBE", "")
+if IS_ROOT and (TEST_ROOT or TEST_PROBE):
+    sys.exit("sumi-sddm-helper: las variables de prueba no se aceptan como root")
+if not IS_ROOT and TEST_ROOT and not os.path.isabs(TEST_ROOT):
+    sys.exit("sumi-sddm-helper: SUMI_SDDM_HELPER_ROOT debe ser absoluta")
+PREFIX = Path(TEST_ROOT) if TEST_ROOT else Path("/")
+OWNER = 0 if not TEST_ROOT else os.geteuid()     # dueño esperado de lo que se toca
+
+
+def P(path: str) -> Path:
+    return PREFIX / path.lstrip("/")
+
+
+THEME_NAME = "sumi"
+THEMES = P("/usr/share/sddm/themes")
+THEME = THEMES / THEME_NAME
+SDDM_CONF = P("/etc/sddm.conf")
+CONF_DIRS = [P("/usr/lib/sddm/sddm.conf.d"), P("/etc/sddm.conf.d")]
+STATE = P("/var/lib/sumi-sddm")
+GREETER = "/usr/bin/sddm-greeter-qt6"
+SETPRIV = "/usr/bin/setpriv"
+THEME_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+MAX_HEADER = 4096
+MAX_CONF = 64 * 1024
+KEEP_BACKUPS = 8
+
+
+def verify_own_code() -> None:
+    """Como root: este archivo y lo que importa deben ser de root y no escribibles por grupo u otros."""
+    if not IS_ROOT:
+        return
+    if BASE != INSTALLED:
+        sys.exit(f"sumi-sddm-helper: como root sólo se ejecuta desde {INSTALLED}")
+    paths = [Path("/usr"), Path("/usr/lib"), INSTALLED, Path(__file__).resolve()]
+    paths += [INSTALLED / "tools", INSTALLED / "tools" / "sumiconf", INSTALLED / "schema",
+              INSTALLED / "schema" / "config-schema.json"]
+    paths += sorted((INSTALLED / "tools" / "sumiconf").glob("*.py"))
+    for p in paths:
+        st = os.lstat(p)
+        if stat.S_ISLNK(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o022:
+            sys.exit(f"sumi-sddm-helper: {p} no es de root o es escribible por otros; no se ejecuta")
+
+
+verify_own_code()
+sys.path.insert(0, str(BASE / "tools"))
+from sumiconf import ConfigError, Schema, strict  # noqa: E402
+from sumiconf import image, ini, probe  # noqa: E402
+
+
+# ── Salida y errores ────────────────────────────────────────────────────────────────────────────────────────────
+class HelperError(Exception):
+    def __init__(self, message: str, code: str = "invalid", **extra):
+        super().__init__(message)
+        self.code = code
+        self.extra = extra
+
+
+def out(obj: dict) -> None:
+    print(json.dumps({"ok": True, "api": API, **obj}, ensure_ascii=False))
+
+
+def caller() -> str:
+    uid = os.environ.get("PKEXEC_UID", "")
+    return f"pkexec:{uid}" if uid.isdigit() else ("root" if IS_ROOT else f"uid:{os.geteuid()}")
+
+
+def log(verb: str, result: str) -> None:
+    """Una línea por operación: cuándo, quién, qué verbo y cómo acabó. Nunca valores de configuración."""
+    try:
+        STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+        line = f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {caller()} {verb} {result}\n"
+        fd = os.open(STATE / "log", os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        with os.fdopen(fd, "a") as f:
+            f.write(line)
+    except OSError:
+        pass
+
+
+# ── Archivos: comprobaciones y escritura atómica ───────────────────────────────────────────────────────────────
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def check_dir(d: Path, what: str) -> None:
+    st = os.lstat(d)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+        raise HelperError(f"{what} ({d}) no es un directorio real", "io")
+    if st.st_uid != OWNER or st.st_mode & 0o022:
+        raise HelperError(f"{what} ({d}) no es de root o es escribible por otros", "io")
+
+
+def read_regular(p: Path, limit: int) -> bytes | None:
+    """Contenido de un archivo regular de root (sin seguir enlaces), o None si no existe."""
+    try:
+        fd = os.open(p, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise HelperError(f"{p}: no se puede abrir ({exc.strerror})", "io") from exc
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != OWNER:
+            raise HelperError(f"{p}: no es un archivo regular de root", "io")
+        if st.st_size > limit:
+            raise HelperError(f"{p}: demasiado grande", "io")
+        with os.fdopen(os.dup(fd), "rb") as f:
+            return f.read(limit + 1)
+    finally:
+        os.close(fd)
+
+
+def write_atomic(dest: Path, data: bytes, mode: int = 0o644, like: os.stat_result | None = None) -> None:
+    """Temporal en el mismo directorio + fsync + rename; nunca a través de un enlace. Conserva modo/dueño de `like`."""
+    if dest.is_symlink():
+        raise HelperError(f"{dest}: es un enlace simbólico; no se escribe", "io")
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.", suffix=".sumi-tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, stat.S_IMODE(like.st_mode) if like else mode)
+        if IS_ROOT:
+            os.chown(tmp, like.st_uid if like else 0, like.st_gid if like else 0)
+        os.replace(tmp, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+    dfd = os.open(dest.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+
+@contextmanager
+def locked():
+    import fcntl
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    check_state_dir()
+    fd = os.open(STATE / "lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise HelperError("otra operación del helper está en curso", "busy") from None
+        yield
+    finally:
+        os.close(fd)
+
+
+def check_state_dir() -> None:
+    st = os.lstat(STATE)
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode) or st.st_uid != OWNER or st.st_mode & 0o077:
+        raise HelperError(f"{STATE} debe ser un directorio de root con modo 0700", "io")
+
+
+def load_state() -> dict:
+    data = read_regular(STATE / "state.json", 1 << 20)
+    try:
+        return json.loads(data) if data else {}
+    except ValueError:
+        raise HelperError(f"{STATE / 'state.json'} está dañado", "io") from None
+
+
+def save_state(st: dict) -> None:
+    write_atomic(STATE / "state.json", json.dumps(st, indent=1, ensure_ascii=False).encode(), mode=0o600)
+
+
+# ── El tema instalado y los archivos del usuario dentro de él ──────────────────────────────────────────────────
+def check_theme() -> None:
+    if not THEME.exists() and not THEME.is_symlink():
+        raise HelperError("el tema Sumi no está instalado (paquete sumi-sddm)", "missing")
+    check_dir(THEMES, "el directorio de temas")
+    check_dir(THEME, "el tema Sumi")
+    meta = read_regular(THEME / "metadata.desktop", 64 * 1024) or b""
+    if b"Theme-Id=sumi" not in meta or b"MainScript=Main.qml" not in meta:
+        raise HelperError("el directorio del tema no parece Sumi (metadata.desktop)", "io")
+    bg = THEME / "backgrounds"
+    if bg.exists() or bg.is_symlink():
+        check_dir(bg, "backgrounds del tema")
+
+
+def user_files() -> dict[str, bytes]:
+    """{nombre relativo: contenido} de lo del usuario ya aplicado en el tema."""
+    found: dict[str, bytes] = {}
+    data = read_regular(THEME / "theme.conf.user", MAX_CONF)
+    if data is not None:
+        found["theme.conf.user"] = data
+    bg = THEME / "backgrounds"
+    if bg.is_dir():
+        for p in sorted(bg.glob("user.*")):
+            data = read_regular(p, image.MAX_BYTES)
+            if data is not None:
+                found[f"backgrounds/{p.name}"] = data
+    return found
+
+
+def install_user_files(files: dict[str, bytes]) -> None:
+    """Deja en el tema EXACTAMENTE estos archivos de usuario (y quita los user.* que sobren)."""
+    current = user_files()
+    if any(k.startswith("backgrounds/") for k in files):
+        bg = THEME / "backgrounds"
+        if not bg.exists():
+            bg.mkdir(mode=0o755)
+            if IS_ROOT:
+                os.chown(bg, 0, 0)
+        check_dir(bg, "backgrounds del tema")
+    for rel, data in files.items():
+        write_atomic(THEME / rel, data, 0o644)
+    for rel in current:
+        if rel not in files:
+            p = THEME / rel
+            if p.is_file() and not p.is_symlink():
+                p.unlink()
+    got = user_files()
+    if {k: sha256(v) for k, v in got.items()} != {k: sha256(v) for k, v in files.items()}:
+        raise HelperError("lo escrito no coincide con lo esperado", "io")
+
+
+# ── Respaldos ──────────────────────────────────────────────────────────────────────────────────────────────────
+def backup(kind: str, files: dict[str, bytes], sddm_conf: bytes | None = None) -> Path:
+    root = STATE / "backups"
+    root.mkdir(mode=0o700, exist_ok=True)
+    d = Path(tempfile.mkdtemp(dir=root, prefix=time.strftime("%Y%m%d-%H%M%S-") + kind + "-"))
+    manifest = {"kind": kind, "time": time.time(), "files": {}, "sddmConf": None}
+    for rel, data in files.items():
+        name = rel.replace("/", "__")
+        write_atomic(d / name, data, 0o600)
+        manifest["files"][rel] = {"name": name, "sha256": sha256(data)}
+    if sddm_conf is not None:
+        write_atomic(d / "sddm.conf", sddm_conf, 0o600)
+        manifest["sddmConf"] = sha256(sddm_conf)
+    write_atomic(d / "manifest.json", json.dumps(manifest, indent=1).encode(), 0o600)
+    entries = sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink())
+    for old in entries[:-KEEP_BACKUPS]:
+        shutil.rmtree(old)
+    return d
+
+
+def latest_backup(kinds: tuple[str, ...]) -> tuple[Path, dict] | None:
+    root = STATE / "backups"
+    if not root.is_dir():
+        return None
+    for d in sorted((p for p in root.iterdir() if p.is_dir() and not p.is_symlink()), reverse=True):
+        m = json.loads(read_regular(d / "manifest.json", 1 << 20) or b"{}")
+        if m.get("kind") in kinds:
+            return d, m
+    return None
+
+
+def backup_files(d: Path, m: dict) -> dict[str, bytes]:
+    files = {}
+    for rel, row in m["files"].items():
+        data = read_regular(d / row["name"], image.MAX_BYTES)
+        if data is None or sha256(data) != row["sha256"]:
+            raise HelperError(f"el respaldo {d.name} está incompleto o alterado", "io")
+        files[rel] = data
+    return files
+
+
+# ── Prueba con el greeter real, como el usuario sddm ───────────────────────────────────────────────────────────
+def journal_lines(pid: int, since: str) -> list[str]:
+    p = subprocess.run(["/usr/bin/journalctl", "--no-pager", "-o", "cat", f"_PID={pid}", "--since", since],
+                       capture_output=True, text=True, timeout=30)
+    return p.stdout.splitlines()
+
+
+def run_probe(theme_dir: Path, conf_text: str | None) -> dict:
+    """Arranca el greeter en --test-mode offscreen sobre `theme_dir` y exige `ready` con el custom esperado."""
+    schema = Schema.load()
+    raw = ini.parse(conf_text) if conf_text else {}
+    expect = probe.expected_custom(schema, raw)
+    since = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 1))
+    runtime = Path(tempfile.mkdtemp(prefix="sumi-sddm-probe-run-"))
+    try:
+        env = ["QT_QPA_PLATFORM=offscreen", "QT_QUICK_BACKEND=software", "LANG=C.UTF-8",
+               f"XDG_RUNTIME_DIR={runtime}", "QT_FORCE_STDERR_LOGGING=1"]
+        if TEST_PROBE:
+            cmd = ["/usr/bin/env", "-i", f"PATH={os.environ.get('PATH', '/usr/bin')}", *env, TEST_PROBE,
+                   "--test-mode", "--theme", str(theme_dir)]
+        else:
+            u = pwd.getpwnam("sddm")
+            os.chown(runtime, u.pw_uid, u.pw_gid)
+            os.chmod(runtime, 0o700)
+            cmd = [SETPRIV, f"--reuid={u.pw_uid}", f"--regid={u.pw_gid}", "--init-groups", "--no-new-privs", "--",
+                   "/usr/bin/env", "-i", "PATH=/usr/bin", f"HOME={u.pw_dir}", *env, GREETER,
+                   "--test-mode", "--theme", str(theme_dir)]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                text=True, cwd="/")
+        try:
+            proc.wait(timeout=5)     # el greeter real no termina solo: 5 s y se le pide salir
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+        try:
+            stdout, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, _ = proc.communicate()
+        lines = [l for l in (stdout or "").splitlines() if l.strip()]
+        if not TEST_PROBE or not any(probe.READY in l for l in lines):
+            for _ in range(10):
+                j = journal_lines(proc.pid, since)
+                if any(probe.READY in l for l in j) or TEST_PROBE:
+                    break
+                time.sleep(0.3)
+            lines += j
+        ok, problems, ready = probe.judge(lines, theme_dir.as_uri(), expect)
+        return {"ok": ok, "problems": problems[:10], "ready": ready.strip(), "expectCustom": expect}
+    finally:
+        shutil.rmtree(runtime, ignore_errors=True)
+
+
+def probe_candidate(files: dict[str, bytes]) -> dict:
+    """Copia del tema con exactamente estos archivos de usuario, legible por sddm, y prueba."""
+    stage_parent = Path("/run") if IS_ROOT else Path(tempfile.gettempdir())
+    stage = Path(tempfile.mkdtemp(dir=stage_parent, prefix="sumi-sddm-stage-"))
+    try:
+        os.chmod(stage, 0o755)
+        target = stage / THEME_NAME
+        shutil.copytree(THEME, target, symlinks=False,
+                        ignore=shutil.ignore_patterns("theme.conf.user", "user.*"))
+        for rel, data in files.items():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            (target / rel).write_bytes(data)
+        for d, dirs, names in os.walk(target):
+            os.chmod(d, 0o755)
+            for n in names:
+                os.chmod(Path(d) / n, 0o644)
+        conf = files.get("theme.conf.user")
+        return run_probe(target, conf.decode("utf-8") if conf else None)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def require_probe(files: dict[str, bytes]) -> dict:
+    r = probe_candidate(files)
+    if not r["ok"]:
+        raise HelperError("el tema no superó la prueba con el greeter real; no se ha cambiado nada", "probe",
+                          problems=r["problems"])
+    return r
+
+
+# ── Entrada de `apply` ─────────────────────────────────────────────────────────────────────────────────────────
+def read_exact(stream, n: int) -> bytes:
+    data = stream.read(n)
+    if len(data) != n:
+        raise HelperError("entrada incompleta", "invalid")
+    return data
+
+
+def read_package(stream) -> dict[str, bytes]:
+    """Formato 1: una línea JSON {"format":1,"conf":N,"image":null|{"kind":K,"bytes":M}} y los bytes, y nada más."""
+    header = stream.readline(MAX_HEADER + 1)
+    if not header.endswith(b"\n") or len(header) > MAX_HEADER:
+        raise HelperError("cabecera de entrada no válida", "invalid")
+    try:
+        h = json.loads(header)
+    except ValueError:
+        raise HelperError("cabecera de entrada no válida", "invalid") from None
+    if not isinstance(h, dict) or set(h) != {"format", "conf", "image"} or h["format"] != 1:
+        raise HelperError("formato de entrada no admitido", "invalid")
+    n = h["conf"]
+    if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n <= MAX_CONF:
+        raise HelperError("tamaño de configuración no válido", "invalid")
+    conf_bytes = read_exact(stream, n)
+    img = h["image"]
+    img_bytes, kind = None, None
+    if img is not None:
+        if not isinstance(img, dict) or set(img) != {"kind", "bytes"} or img["kind"] not in ("jpg", "png", "webp"):
+            raise HelperError("descripción de imagen no válida", "invalid")
+        m = img["bytes"]
+        if not isinstance(m, int) or isinstance(m, bool) or not 32 <= m <= image.MAX_BYTES:
+            raise HelperError("tamaño de imagen no válido", "invalid")
+        img_bytes, kind = read_exact(stream, m), img["kind"]
+    if stream.read(1):
+        raise HelperError("datos de más tras la entrada", "invalid")
+
+    try:
+        text = conf_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HelperError("la configuración no es UTF-8", "invalid") from None
+    schema = Schema.load()
+    try:
+        values = ini.validate(schema, ini.parse(text))
+    except ConfigError as exc:
+        raise HelperError(str(exc), "invalid") from None
+    files: dict[str, bytes] = {}
+    bg = values.get("background", "")
+    if img_bytes is not None:
+        info = inspect_bytes(img_bytes)
+        if info.kind != kind:
+            raise HelperError(f"la imagen es {info.kind}, no {kind}", "invalid")
+        name = f"backgrounds/user.{info.kind}"
+        if bg != name:
+            raise HelperError(f"con imagen, background debe ser «{name}»", "invalid")
+        files[name] = img_bytes
+    elif bg.startswith("backgrounds/"):
+        raise HelperError("background apunta a una imagen que no se ha enviado", "invalid")
+    elif bg.startswith("/"):
+        try:
+            image.inspect(Path(bg))  # sólo /usr/share/… (la lectura estricta no admite otra cosa)
+        except ConfigError as exc:
+            raise HelperError(str(exc), "invalid") from None
+    if values:
+        files["theme.conf.user"] = ini.render(schema, values, ini.APPLIED_HEADER).encode()
+    return files
+
+
+def inspect_bytes(data: bytes) -> image.ImageInfo:
+    """Comprueba la imagen desde un archivo temporal privado (0600, propio), no desde ninguna ruta del usuario."""
+    work = STATE / "work"
+    work.mkdir(mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=work, prefix="incoming-")
+    try:
+        os.write(fd, data)
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            return image.inspect_fd(fd)
+        except ConfigError as exc:
+            raise HelperError(str(exc), "invalid") from None
+    finally:
+        os.close(fd)
+        os.unlink(tmp)
+
+
+# ── /etc/sddm.conf ─────────────────────────────────────────────────────────────────────────────────────────────
+SECTION_RE = re.compile(rb"^\s*\[([^\]]*)\]\s*$")
+CURRENT_RE = re.compile(rb"^(\s*Current\s*=\s*)(.*?)(\s*)$")
+
+
+def current_in(data: bytes) -> str | None:
+    """Valor efectivo de [Theme] Current en un archivo (el último gana), o None si no lo tiene."""
+    section, value = None, None
+    for line in data.splitlines():
+        m = SECTION_RE.match(line)
+        if m:
+            section = m.group(1).strip()
+            continue
+        if section == b"Theme":
+            c = CURRENT_RE.match(line)
+            if c:
+                value = c.group(2).decode("utf-8", "replace").strip()
+    return value
+
+
+def effective_theme() -> tuple[str, str]:
+    """(tema, archivo que lo decide) con el orden de SDDM: conf.d de /usr/lib, de /etc y, el último, /etc/sddm.conf."""
+    theme, where = "", "default"
+    files = []
+    for d in CONF_DIRS:
+        if d.is_dir():
+            files += sorted(p for p in d.glob("*.conf") if p.is_file())
+    files.append(SDDM_CONF)
+    for f in files:
+        try:
+            data = f.read_bytes()
+        except OSError:
+            continue
+        v = current_in(data)
+        if v is not None:
+            theme, where = v, str(f)
+    return theme, where
+
+
+def set_current(data: bytes, value: str | None) -> bytes:
+    """Cambia SÓLO el valor de Current en [Theme] (todas sus apariciones); None la quita. Si no hay, la añade."""
+    lines = data.splitlines(keepends=True)
+    out, section, done, theme_header = [], None, False, None
+    for line in lines:
+        bare = line.rstrip(b"\r\n")
+        m = SECTION_RE.match(bare)
+        if m:
+            section = m.group(1).strip()
+            out.append(line)
+            if section == b"Theme" and theme_header is None:
+                theme_header = len(out)
+            continue
+        c = CURRENT_RE.match(bare) if section == b"Theme" else None
+        if c:
+            done = True
+            if value is None:
+                continue
+            eol = line[len(bare):] or b"\n"
+            out.append(c.group(1) + value.encode() + c.group(3) + eol)
+            continue
+        out.append(line)
+    if not done and value is not None:
+        if theme_header is not None:
+            out.insert(theme_header, b"Current=" + value.encode() + b"\n")
+        else:
+            if out and not out[-1].endswith(b"\n"):
+                out.append(b"\n")
+            out.append(b"\n[Theme]\nCurrent=" + value.encode() + b"\n")
+    return b"".join(out)
+
+
+def read_sddm_conf() -> tuple[bytes, os.stat_result | None]:
+    if not SDDM_CONF.exists() and not SDDM_CONF.is_symlink():
+        return b"", None
+    data = read_regular(SDDM_CONF, 1 << 20)
+    return data, os.lstat(SDDM_CONF)
+
+
+# ── Verbos ─────────────────────────────────────────────────────────────────────────────────────────────────────
+def version() -> str:
+    try:
+        return (BASE / "VERSION").read_text().strip()
+    except OSError:
+        return "0"
+
+
+def v_status(_args) -> dict:
+    installed = THEME.is_dir() and not THEME.is_symlink()
+    theme, where = effective_theme()
+    st: dict = {"version": version(), "installed": installed, "activeTheme": theme, "decidedBy": where,
+                "active": theme == THEME_NAME, "applied": {}}
+    if installed:
+        try:
+            st["applied"] = {k: sha256(v) for k, v in user_files().items()}
+        except HelperError as exc:
+            st["appliedError"] = str(exc)
+    try:
+        s = load_state()
+        st["previousTheme"] = s.get("previousTheme")
+        st["lastChange"] = s.get("lastChange")
+    except (HelperError, PermissionError):
+        pass
+    return st
+
+
+def v_probe(_args) -> dict:
+    check_theme()
+    r = require_probe(user_files())
+    return {"probe": r}
+
+
+def v_apply(_args) -> dict:
+    check_theme()
+    files = read_package(sys.stdin.buffer)
+    r = require_probe(files)
+    old = user_files()
+    if {k: sha256(v) for k, v in old.items()} == {k: sha256(v) for k, v in files.items()}:
+        return {"changed": False, "probe": r, "applied": {k: sha256(v) for k, v in files.items()}}
+    b = backup("apply", old)
+    install_user_files(files)
+    record("apply", b)
+    return {"changed": True, "probe": r, "backup": b.name, "applied": {k: sha256(v) for k, v in files.items()}}
+
+
+def v_reset(_args) -> dict:
+    check_theme()
+    old = user_files()
+    if not old:
+        return {"changed": False}
+    b = backup("reset", old)
+    install_user_files({})
+    record("reset", b)
+    return {"changed": True, "backup": b.name}
+
+
+def v_rollback(_args) -> dict:
+    check_theme()
+    found = latest_backup(("apply", "reset", "rollback"))
+    if not found:
+        raise HelperError("no hay respaldo al que volver", "missing")
+    d, m = found
+    files = backup_files(d, m)
+    r = require_probe(files)
+    old = user_files()
+    b = backup("rollback", old)      # deshacer el deshacer también es posible
+    install_user_files(files)
+    shutil.rmtree(d)                 # consumido: el siguiente rollback va al anterior
+    record("rollback", b)
+    return {"changed": True, "probe": r, "restored": d.name, "backup": b.name}
+
+
+def v_activate(_args) -> dict:
+    check_theme()
+    theme, _where = effective_theme()
+    if theme == THEME_NAME:
+        return {"changed": False, "activeTheme": theme}
+    r = require_probe(user_files())
+    data, like = read_sddm_conf()
+    new = set_current(data, THEME_NAME)
+    b = backup("activate", {}, data)
+    st = load_state()
+    st.update({"previousTheme": theme, "previousInFile": current_in(data), "activatedConf": sha256(new),
+               "activateBackup": b.name})
+    save_state(st)
+    write_atomic(SDDM_CONF, new, 0o644, like)
+    after, _ = effective_theme()
+    if after != THEME_NAME:
+        write_atomic(SDDM_CONF, data, 0o644, like)
+        raise HelperError(f"tras escribir, el tema efectivo sigue siendo «{after}»; se ha repuesto el archivo", "io")
+    record("activate", b)
+    return {"changed": True, "activeTheme": after, "previousTheme": theme, "probe": r, "backup": b.name}
+
+
+def v_deactivate(args) -> dict:
+    target = args[0] if args else None
+    if target is not None and (not THEME_NAME_RE.match(target) or target == THEME_NAME
+                               or not (THEMES / target / "metadata.desktop").is_file()):
+        raise HelperError(f"«{target}» no es un tema instalado en {THEMES}", "invalid")
+    theme, _ = effective_theme()
+    if theme != THEME_NAME and target is None:
+        return {"changed": False, "activeTheme": theme}
+    st = load_state()
+    data, like = read_sddm_conf()
+    orig = None
+    if target is None and st.get("activatedConf") == sha256(data) and st.get("activateBackup"):
+        # Nadie tocó el archivo desde la activación: se repone exactamente el de antes (si su respaldo sigue).
+        orig = read_regular(STATE / "backups" / st["activateBackup"] / "sddm.conf", 1 << 20)
+    if orig is not None:
+        new = orig
+    else:
+        prev = target or st.get("previousTheme")
+        if not prev:
+            raise HelperError("no se sabe qué tema había antes: indica uno instalado (deactivate TEMA)", "missing")
+        in_file = None if target is None and st.get("previousInFile") is None else prev
+        new = set_current(data, in_file)
+    b = backup("deactivate", {}, data)
+    write_atomic(SDDM_CONF, new, 0o644, like)
+    after, _ = effective_theme()
+    if after == THEME_NAME:
+        write_atomic(SDDM_CONF, data, 0o644, like)
+        raise HelperError("tras escribir, Sumi seguía activo; se ha repuesto el archivo", "io")
+    for k in ("activatedConf", "activateBackup", "previousInFile"):
+        st.pop(k, None)
+    save_state(st)
+    record("deactivate", b)
+    return {"changed": True, "activeTheme": after, "backup": b.name}
+
+
+def record(verb: str, b: Path) -> None:
+    st = load_state()
+    st["lastChange"] = {"verb": verb, "time": time.time(), "backup": b.name, "by": caller()}
+    save_state(st)
+
+
+VERBS = {"status": v_status, "probe": v_probe, "apply": v_apply, "reset": v_reset, "rollback": v_rollback,
+         "activate": v_activate, "deactivate": v_deactivate}
+ROOT_VERBS = {"probe", "apply", "reset", "rollback", "activate", "deactivate"}
+
+
+def main(argv: list[str]) -> int:
+    args = [a for a in argv if a != "--json"]
+    if not args or args[0] not in VERBS or len(args) > (2 if args[0] == "deactivate" else 1):
+        print(json.dumps({"ok": False, "api": API, "code": "usage",
+                          "error": "uso: status | probe | apply | reset | rollback | activate | deactivate [TEMA]"}))
+        return 2
+    verb = args[0]
+    if verb in ROOT_VERBS and not IS_ROOT and not TEST_ROOT:
+        print(json.dumps({"ok": False, "api": API, "code": "unsupported",
+                          "error": f"«{verb}» necesita root: usa `sumi-sddm system {verb}` (pkexec)"}))
+        return 1
+    try:
+        if verb == "status":
+            out(v_status(args[1:]))
+            return 0
+        with locked():
+            result = VERBS[verb](args[1:])
+        log(verb, "ok" if result.get("changed", True) else "unchanged")
+        out(result)
+        return 0
+    except HelperError as exc:
+        log(verb, f"error:{exc.code}")
+        print(json.dumps({"ok": False, "api": API, "code": exc.code, "error": str(exc), **exc.extra},
+                         ensure_ascii=False))
+        return 1
+    except (OSError, ConfigError) as exc:
+        log(verb, "error:io")
+        print(json.dumps({"ok": False, "api": API, "code": "io", "error": str(exc)}, ensure_ascii=False))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

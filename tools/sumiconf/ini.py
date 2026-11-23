@@ -18,6 +18,10 @@ from pathlib import Path
 from .schema import ConfigError, Schema, strict, to_ini
 
 KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*$")
+# Cabecera del theme.conf.user que el helper deja en el tema instalado. La CLI genera el mismo texto para saber si
+# lo aplicado coincide con lo guardado (`sumi-sddm system status`): no cambiarla en un solo lado.
+APPLIED_HEADER = ("Sumi SDDM — aplicado por sumi-sddm-helper; se edita con `sumi-sddm config` y se aplica con\n"
+                  "`sumi-sddm system apply`.")
 MAX_BYTES = 64 * 1024
 
 

@@ -1,0 +1,46 @@
+# Sumi SDDM — paquete local, construido desde este repositorio (sin descargas).
+#   cd packaging/arch && makepkg            # construir (sin root)
+#   sudo pacman -U sumi-sddm-*.pkg.tar.zst  # instalar: NO activa el tema (eso es `sumi-sddm system activate`)
+pkgname=sumi-sddm
+pkgver=$(tr -d '[:space:]' < "${startdir:-.}/../../VERSION")
+pkgrel=1
+pkgdesc="Minimal SDDM login theme with a top notch, plus a polkit helper to apply its settings"
+arch=('any')
+url=""   # sin repositorio público todavía
+# La licencia del proyecto está pendiente de decidir por su autor; Inter va con la SIL OFL 1.1.
+license=('LicenseRef-pending' 'OFL-1.1')
+depends=('sddm' 'qt6-declarative' 'python' 'polkit' 'util-linux' 'systemd')
+optdepends=('qt6-imageformats: WebP wallpapers')
+install=sumi-sddm.install
+source=()
+
+_src() { realpath "$startdir/../.."; }
+
+check() {
+  cd "$(_src)"
+  python3 -B tools/sumi-sddm gen --check
+  python3 -B -m unittest discover -s tests/py -p 'test_helper.py'
+}
+
+package() {
+  local src
+  src="$(_src)"
+  # El tema. Sin theme.conf.user ni backgrounds/: los pone el helper con la configuración de cada usuario.
+  install -d "$pkgdir/usr/share/sddm/themes/sumi"
+  cp -r --no-preserve=ownership "$src/theme/sumi/." "$pkgdir/usr/share/sddm/themes/sumi/"
+  rm -rf "$pkgdir/usr/share/sddm/themes/sumi/theme.conf.user" "$pkgdir/usr/share/sddm/themes/sumi/backgrounds"
+  find "$pkgdir/usr/share/sddm/themes/sumi" -type d -exec chmod 0755 {} + -o -type f -exec chmod 0644 {} +
+
+  # El helper y lo que importa, de root y no escribibles por otros (el helper lo exige al correr como root).
+  install -Dm0755 "$src/system/sumi-sddm-helper" "$pkgdir/usr/lib/sumi-sddm/sumi-sddm-helper"
+  install -Dm0644 "$src/VERSION" "$pkgdir/usr/lib/sumi-sddm/VERSION"
+  install -Dm0644 "$src/schema/config-schema.json" "$pkgdir/usr/lib/sumi-sddm/schema/config-schema.json"
+  for f in __init__ schema ini image probe paths; do
+    install -Dm0644 "$src/tools/sumiconf/$f.py" "$pkgdir/usr/lib/sumi-sddm/tools/sumiconf/$f.py"
+  done
+
+  install -Dm0644 "$src/system/org.sumi.sddm.helper.policy" \
+    "$pkgdir/usr/share/polkit-1/actions/org.sumi.sddm.helper.policy"
+  install -Dm0644 "$src/theme/sumi/assets/fonts/OFL.txt" "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
+  install -Dm0644 "$src/docs/RECUPERACION.md" "$pkgdir/usr/share/doc/$pkgname/RECUPERACION.md"
+}

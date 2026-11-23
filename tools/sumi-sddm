@@ -18,6 +18,13 @@ Configuración del usuario (en ~/.config/sumi-sddm/; el tema instalado no se toc
   wallpaper set ARCHIVO | clear | info [--json]
   Las escrituras admiten --expect HUELLA (la «stamp» de config show): si algo cambió, no se escribe.
 
+Sistema (Fase 5; cada orden que cambia algo pide la contraseña con pkexec):
+  system status                     tema instalado y activo, y si tu configuración está aplicada (sin root)
+  system apply                      lleva tu configuración y tu wallpaper al tema instalado (no lo activa)
+  system reset | rollback | probe
+  system activate                   Sumi será la pantalla de inicio la PRÓXIMA vez (no reinicia SDDM)
+  system deactivate [TEMA]          vuelve al tema anterior
+
 Instalación de usuario (sin privilegios; copia, no enlaza):
   install --user | uninstall --user | install --status   ~/.local/share/sumi-sddm + ~/.local/bin/sumi-sddm
 
@@ -32,6 +39,7 @@ Desarrollo:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pwd
@@ -417,6 +425,106 @@ def cmd_try(args) -> int:
         return fail_exc(exc, False)
 
 
+# ── Sistema: el helper con pkexec (Fase 5) ───────────────────────────────────────────────────────────────
+HELPER = "/usr/lib/sumi-sddm/sumi-sddm-helper"
+PKEXEC = "/usr/bin/pkexec"
+
+
+def helper_paths() -> tuple[str, str]:
+    """El helper instalado y pkexec. Las pruebas del repositorio pueden sustituirlos (nunca la copia instalada)."""
+    if state.kind() == "checkout":
+        return (os.environ.get("SUMI_SDDM_HELPER") or HELPER, os.environ.get("SUMI_SDDM_PKEXEC") or PKEXEC)
+    return HELPER, PKEXEC
+
+
+def system_package(schema: Schema) -> tuple[bytes, dict[str, str], str]:
+    """Lo que se envía al helper (formato 1), los hashes que deberían quedar en el tema y la huella de lo enviado."""
+    with state.locked(exclusive=False):
+        vals = load_user(schema)
+        stamp = state.stamp()
+        img, kind = b"", None
+        bg = vals.get("background", "")
+        if bg.startswith(paths.WALLPAPER_DIR + "/"):
+            fd = image.open_regular(paths.config_dir() / bg)
+            try:
+                info = image.inspect_fd(fd)
+                with os.fdopen(os.dup(fd), "rb") as f:
+                    f.seek(0)    # el descriptor duplicado comparte la posición que dejó inspect_fd
+                    img, kind = f.read(image.MAX_BYTES + 1), info.kind
+            finally:
+                os.close(fd)
+    conf = ini.render(schema, vals, ini.APPLIED_HEADER).encode() if vals else b""
+    header = {"format": 1, "conf": len(conf), "image": {"kind": kind, "bytes": len(img)} if kind else None}
+    expected = {}
+    if vals:
+        expected["theme.conf.user"] = hashlib.sha256(conf).hexdigest()
+    if kind:
+        expected[f"backgrounds/user.{kind}"] = hashlib.sha256(img).hexdigest()
+    return (json.dumps(header).encode() + b"\n" + conf + img), expected, stamp
+
+
+def run_helper(argv: list[str], data: bytes | None = None, timeout: int = 600) -> tuple[dict | None, int, str]:
+    p = subprocess.run(argv, input=data if data is not None else b"", capture_output=True, timeout=timeout)
+    text = p.stdout.decode("utf-8", "replace").strip()
+    doc = None
+    for line in reversed(text.splitlines()):
+        try:
+            doc = json.loads(line)
+            break
+        except ValueError:
+            continue
+    return doc, p.returncode, p.stderr.decode("utf-8", "replace").strip()
+
+
+def cmd_system(args) -> int:
+    j = args.json
+    helper, pkexec = helper_paths()
+    if not os.path.exists(helper):
+        return fail("Sumi SDDM no está instalado en el sistema (paquete sumi-sddm; ver packaging/arch)", j,
+                    code="missing")
+    try:
+        schema = Schema.load()
+        if args.op == "status":
+            doc, rc, err = run_helper([helper, "status", "--json"], timeout=60)
+            if not doc or doc.get("ok") is not True:
+                return fail((doc or {}).get("error") or err or "el helper no respondió", j, code="io")
+            _, expected, stamp = system_package(schema)
+            doc.pop("ok", None), doc.pop("api", None)
+            doc["inSync"] = doc.get("installed") is True and doc.get("applied") == expected
+            doc["stamp"] = stamp
+            emit(doc, j, (f"instalado {doc.get('version')} · " if doc.get("installed") else "no instalado · ")
+                 + f"tema activo: {doc.get('activeTheme') or '(por defecto)'}"
+                 + (" · tu configuración está aplicada" if doc["inSync"] else
+                    " · tu configuración NO está aplicada" if doc.get("installed") else ""))
+            return 0
+        data = None
+        argv = [pkexec, helper, args.op]
+        if args.op == "deactivate" and args.theme:
+            argv.append(args.theme)
+        sent_stamp = None
+        if args.op == "apply":
+            data, _, sent_stamp = system_package(schema)
+    except ConfigError as exc:
+        return fail_exc(exc, j)
+    doc, rc, err = run_helper(argv, data)
+    if doc is None:
+        if rc in (126, 127):
+            return fail("autenticación cancelada o denegada; no se ha cambiado nada", j, code="denied")
+        return fail(err or f"el helper terminó con código {rc} sin respuesta", j, code="io")
+    if doc.get("ok") is not True:
+        extra = {k: v for k, v in doc.items() if k not in ("ok", "api", "code", "error")}
+        return fail(str(doc.get("error", "error del helper")), j, code=str(doc.get("code", "io")), **extra)
+    doc.pop("ok", None), doc.pop("api", None)
+    if sent_stamp:
+        doc["stamp"] = sent_stamp
+    human = {"apply": "configuración aplicada al tema instalado" if doc.get("changed") else "ya estaba aplicada",
+             "reset": "configuración quitada del tema instalado", "rollback": "vuelta al estado anterior",
+             "activate": "Sumi será la pantalla de inicio la PRÓXIMA vez que aparezca",
+             "deactivate": f"tema activo: {doc.get('activeTheme')}", "probe": "el tema instalado supera la prueba"}
+    emit(doc, j, human.get(args.op, "hecho"))
+    return 0
+
+
 def stamp_arg(v: str) -> str:
     if not re.fullmatch(r"[0-9a-f]{32}", v):
         raise argparse.ArgumentTypeError("huella inválida (32 caracteres hexadecimales)")
@@ -640,6 +748,16 @@ def main() -> int:
     x = wsub.add_parser("info")
     x.add_argument("--json", action="store_true")
     w.set_defaults(func=cmd_wallpaper)
+
+    sy = sub.add_parser("system", help="tema instalado en el sistema (helper con pkexec)")
+    sysub = sy.add_subparsers(dest="op", required=True)
+    for name in ("status", "probe", "apply", "reset", "rollback", "activate"):
+        x = sysub.add_parser(name)
+        x.add_argument("--json", action="store_true")
+    x = sysub.add_parser("deactivate")
+    x.add_argument("theme", nargs="?", help="tema instalado al que volver (por defecto, el de antes)")
+    x.add_argument("--json", action="store_true")
+    sy.set_defaults(func=cmd_system)
 
     i = sub.add_parser("install")
     mode = i.add_mutually_exclusive_group(required=True)

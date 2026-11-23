@@ -1,0 +1,23 @@
+# Mensajes de pacman. No activan, no reinician y no tocan /etc: eso sólo lo hace el helper, por orden del usuario.
+
+post_install() {
+  echo ">>> Sumi SDDM está instalado pero NO activo: la pantalla de inicio sigue con su tema actual."
+  echo ">>> Aplicar tu configuración: sumi-sddm system apply · activar: sumi-sddm system activate"
+  echo ">>> Recuperación desde una TTY: sudo /usr/lib/sumi-sddm/sumi-sddm-helper deactivate"
+}
+
+post_upgrade() {
+  echo ">>> Sumi SDDM actualizado. Tu configuración aplicada (theme.conf.user, backgrounds/user.*) se conserva."
+}
+
+pre_remove() {
+  if grep -Eqs '^[[:space:]]*Current[[:space:]]*=[[:space:]]*sumi[[:space:]]*$' /etc/sddm.conf; then
+    echo ">>> ATENCIÓN: Sumi es el tema ACTIVO de SDDM. Sin él, SDDM usará su tema interno."
+    echo ">>> Antes de desinstalar, mejor: sudo /usr/lib/sumi-sddm/sumi-sddm-helper deactivate"
+  fi
+}
+
+post_remove() {
+  echo ">>> Quedan, si se aplicaron: /usr/share/sddm/themes/sumi/{theme.conf.user,backgrounds/} y /var/lib/sumi-sddm/"
+  echo ">>> (respaldos del helper). Se pueden borrar a mano."
+}
