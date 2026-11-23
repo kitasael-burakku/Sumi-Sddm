@@ -16,6 +16,7 @@ from .schema import ConfigError
 
 MAX_BYTES = 40 * 1024 * 1024
 MIN_SIDE = 320
+AVATAR_MIN_SIDE = 64
 MAX_SIDE = 16384
 MAX_PIXELS = 120_000_000
 QT_PLUGINS = Path("/usr/lib/qt6/plugins/imageformats")
@@ -112,7 +113,7 @@ def open_regular(path: Path) -> int:
     return fd
 
 
-def inspect_fd(fd: int) -> ImageInfo:
+def inspect_fd(fd: int, min_side: int = MIN_SIDE) -> ImageInfo:
     st = os.fstat(fd)
     if st.st_size > MAX_BYTES:
         raise ConfigError(f"imagen demasiado grande ({st.st_size // (1024 * 1024)} MiB; máximo {MAX_BYTES // (1024 * 1024)})")
@@ -126,15 +127,15 @@ def inspect_fd(fd: int) -> ImageInfo:
     kind, w, h = got
     if kind == "webp" and not webp_supported():
         raise ConfigError("WebP necesita qt6-imageformats, que no está instalado")
-    if min(w, h) < MIN_SIDE or max(w, h) > MAX_SIDE or w * h > MAX_PIXELS:
-        raise ConfigError(f"dimensiones no admitidas ({w}×{h}; lado mínimo {MIN_SIDE}, máximo {MAX_SIDE})")
+    if min(w, h) < min_side or max(w, h) > MAX_SIDE or w * h > MAX_PIXELS:
+        raise ConfigError(f"dimensiones no admitidas ({w}×{h}; lado mínimo {min_side}, máximo {MAX_SIDE})")
     return ImageInfo(kind, w, h, st.st_size)
 
 
-def inspect(path: Path) -> ImageInfo:
+def inspect(path: Path, min_side: int = MIN_SIDE) -> ImageInfo:
     fd = open_regular(Path(path))
     try:
-        return inspect_fd(fd)
+        return inspect_fd(fd, min_side)
     finally:
         os.close(fd)
 

@@ -68,6 +68,9 @@ Window {
             fill(win.opts.users);
             if (win.opts.me !== "" && count > 0)
                 setProperty(0, "realName", win.opts.me);
+            // --meicon: el avatar real del usuario (AccountsService) en su ficha, para la vista previa
+            if ((win.opts.meicon || "") !== "" && count > 0)
+                setProperty(0, "icon", win.opts.meicon);
         }
     }
     MockSessions {

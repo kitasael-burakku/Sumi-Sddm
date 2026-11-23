@@ -4,8 +4,8 @@ Tema de inicio de sesión para SDDM (≥ 0.21, Qt 6): minimalista, con una notch
 autenticación. Compatible con Sumi Shell, pero **independiente**: no usa Quickshell, Hyprland ni ningún
 servicio de Sumi.
 
-> Estado: Fase 4 hecha: contrato JSON, `install --user` y Settings → Login screen entregado en Sumi Shell.
-> El tema **no está instalado ni activado** en el sistema (Fase 5).
+> Estado: Fase 5. El tema está **instalado (paquete) y activo** en esta máquina; recuperación en
+> [docs/RECUPERACION.md](docs/RECUPERACION.md).
 
 ## Estructura
 
@@ -43,6 +43,7 @@ tools/sumi-sddm config show                       # * = personalizado
 tools/sumi-sddm config set clockFormat=12h accentColor=#ffb38a   # valida todo o no escribe nada
 tools/sumi-sddm config unset clockFormat
 tools/sumi-sddm wallpaper set ~/Imágenes/fondo.jpg               # valida y copia; clear | info
+tools/sumi-sddm avatar set ~/Imágenes/yo.png                     # tu avatar (AccountsService, sin contraseña)
 tools/sumi-sddm preview                           # PNG en ~/.cache/sumi-sddm/preview/
 tools/sumi-sddm try --yes                         # ventana --test-mode (toma el teclado)
 ```

@@ -65,6 +65,9 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 | `config restore [--expect S] --json` | `stamp` |
 | `wallpaper set ARCHIVO [--expect S] --json` | `background`, `width`, `height`, `kind`, `bytes`, `stamp` |
 | `wallpaper clear [--expect S] --json` | `stamp` |
+| `avatar info --json` | `iconFile` (AccountsService), `exists`, `readableBySddm`, `faceIcon`, `homeOpenToOthers`, `sddmUses` (lo que verá la pantalla de inicio; "" = iniciales) |
+| `avatar set ARCHIVO --json` | lo de `info`, más `source` ({kind, width, height}) y `size` (lado del PNG cuadrado enviado: 512, 384 o 256) |
+| `avatar clear --json` | `iconFile` |
 | `wallpaper info --json` | `background`; si hay imagen, además `file`, `width`, `height`, `kind`, `bytes` |
 | `preview [--scenario S] [--size AxH] [--out PNG] [--backend auto\|opengl\|software] --json` | `png`, `scenario`, `size`, `stamp` (de la configuración con la que se generó) y `backend` (el que se usó: `auto` prueba OpenGL y, sin contexto gráfico, software, sin blur ni sombras) |
 | `install --status --json` | `launcher`, `installed`, `release`, `foreign` |

@@ -3,8 +3,9 @@ import QtQuick.Effects
 
 /*
  * Avatar circular. Muestra iniciales si no hay imagen, si la imagen es la genérica de SDDM
- * (`…/faces/.face.icon`) o si falla al cargar. Con el renderizador software (sin MultiEffect)
- * la imagen se recorta en un cuadrado redondeado en vez de un círculo.
+ * (`…/faces/.face.icon`) o si falla al cargar. Con RHI, la máscara es un MultiEffect; con el
+ * renderizador software (sin MultiEffect) un Canvas dibuja la imagen dentro de un círculo
+ * (`clip` de un Rectangle sólo recorta al rectángulo: el radio no cuenta).
  */
 Item {
     id: root
@@ -94,18 +95,43 @@ Item {
         maskSpreadAtMin: 1.0
     }
 
-    // Reserva sin efectos: cuadrado redondeado.
-    Rectangle {
+    // Reserva sin efectos: la imagen ya cargada, recortada como «cover» y dibujada dentro de un círculo.
+    Canvas {
+        id: soft
+        objectName: "avatarCanvas"
         anchors.fill: parent
         visible: root.showingImage && root.style.softwareRenderer
-        radius: width * 0.22
-        clip: true
-        color: "transparent"
+        readonly property bool wanted: root.showingImage && root.style.softwareRenderer
+        // El Canvas carga su propia copia: dibujar desde el Image oculto no funciona con el renderizador software.
+        readonly property url src: wanted ? img.source : ""
+        onSrcChanged: if (src.toString() !== "") loadImage(src)
+        onImageLoaded: requestPaint()
+        // Sólo hace falta la proporción («cover»); createImageData(url) no da el tamaño en Qt 6.12.
         Image {
-            anchors.fill: parent
-            source: root.style.softwareRenderer ? img.source : ""
-            fillMode: Image.PreserveAspectCrop
-            sourceSize: img.sourceSize
+            id: ratio
+            visible: false
+            source: soft.src
+            sourceSize.width: 64
+            asynchronous: true
+            onStatusChanged: soft.requestPaint()
+        }
+        onWantedChanged: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            const ctx = getContext("2d");
+            ctx.reset();
+            if (!wanted || !isImageLoaded(src) || ratio.status !== Image.Ready || ratio.implicitHeight <= 0)
+                return;
+            const aspect = ratio.implicitWidth / ratio.implicitHeight;
+            const dw = Math.max(width, height * aspect), dh = Math.max(height, width / aspect);
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(width / 2, height / 2, Math.min(width, height) / 2, 0, 2 * Math.PI);
+            ctx.closePath();
+            ctx.clip();
+            ctx.drawImage(src, (width - dw) / 2, (height - dh) / 2, dw, dh);
+            ctx.restore();
         }
     }
 }

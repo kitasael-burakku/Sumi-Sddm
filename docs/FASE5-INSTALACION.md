@@ -125,3 +125,38 @@ Con el diálogo de polkit de la shell:
   - Respaldo `20261122-203737-apply-*`.
   - Los archivos son `root:root 0644` y el estado queda `inSync`.
 - **Tema activo:** sigue `orbital`. La activación es un paso aparte.
+
+### B5: activación (2026-11-22, por orden expresa del autor)
+
+`sumi-sddm system activate`, con el diálogo de polkit:
+- **Prueba previa** como `sddm`: pasa con `custom=7`.
+- **Respaldo:** `20261122-204501-activate-*`.
+- **Cambio en `/etc/sddm.conf`:** el `diff` es sólo `Current=orbital` → `Current=sumi`, y el archivo sigue siendo
+  `root:root 0644`.
+- **Estado:** `system status` da `activeTheme: sumi` (decidido por `/etc/sddm.conf`), `active` e `inSync`.
+- **Sin reinicios:** ni SDDM (activo desde las 09:56) ni la shell (PID 1416, `NRestarts=0`). Se verá en la
+  próxima pantalla de inicio.
+- **Pendiente:** comprobar el inicio de sesión real (B6, autor).
+
+## Mejoras posteriores (2026-11-22)
+
+- **Sugerencia en el aviso de fuente.** El aviso de `fontFamily` sugiere la familia instalada más parecida:
+  «“Maple Mono” is not installed … did you mean “Maple Mono NF”?». La sugerencia va también en el campo
+  `suggestion`.
+- **Avatar.** `sumi-sddm avatar info | set ARCHIVO | clear`, por **AccountsService**:
+  - **Por qué AccountsService.** SDDM busca `~/.face.icon` → `/var/lib/AccountsService/icons/<usuario>` →
+    `FacesDir`. El primero no sirve con el `$HOME` en `drwx--x---`. AccountsService deja a cada usuario cambiar SU
+    avatar (`change-own-user-data`: sí, sin contraseña) y guarda una copia que `sddm` puede leer. No amplía el
+    helper de root.
+  - **La imagen.** Se valida por contenido (lado mínimo 64) y se recorta a un PNG cuadrado de 512 px con Qt
+    offscreen, para quedar bajo el límite de 1 MiB de AccountsService.
+  - **Vista previa.** Enseña el avatar real si la pantalla de inicio podrá leerlo (`--meicon` del arnés).
+  - **Pruebas.** 3 casos con un AccountsService falso. **Tu avatar real no se ha cambiado.**
+- **Arreglo del tema: avatar circular con el renderizador software.** Antes, `clip` de un `Rectangle` sólo
+  recortaba al rectángulo, así que una foto salía cuadrada y tapaba el anillo. Las fotos reales no se habían
+  probado: sólo las iniciales. Ahora un `Canvas` dibuja la imagen como «cover» dentro de un círculo. Con OpenGL
+  ya estaba bien (MultiEffect).
+  - **Prueba** `tests/qml/tst_avatar.qml` en los dos renderizadores: pasa con el arreglo y falla en software con
+    el código anterior.
+  - **Versión.** Sube a **0.4.1**: el tema instalado (0.4.0) aún no lleva el arreglo y hay que reinstalar el
+    paquete.

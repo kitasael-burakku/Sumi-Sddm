@@ -16,6 +16,7 @@ Configuración del usuario (en ~/.config/sumi-sddm/; el tema instalado no se toc
   config restore                    recupera la copia .prev
   config fonts [--json]             familias instaladas (las de tu $HOME no las verá el greeter)
   wallpaper set ARCHIVO | clear | info [--json]
+  avatar set ARCHIVO | clear | info [--json]   tu avatar (AccountsService; recortado a 512 px, sin contraseña)
   Las escrituras admiten --expect HUELLA (la «stamp» de config show): si algo cambió, no se escribe.
 
 Sistema (Fase 5; cada orden que cambia algo pide la contraseña con pkexec):
@@ -373,7 +374,7 @@ def stage_theme(where: str, with_user: bool, user_conf_file: str | None = None) 
 
 
 def render_one(qml: str, theme: Path | None, scenario: str, size: str, out: Path, backend: str,
-               config: dict | None, me: str = "") -> tuple[bool, list[str]]:
+               config: dict | None, me: str = "", meicon: str = "") -> tuple[bool, list[str]]:
     cmd = [qml, str(paths.HARNESS / "Render.qml"), "--", f"--scenario={scenario}", f"--size={size}", f"--out={out}"]
     if theme:
         cmd.append(f"--theme={theme}")
@@ -381,6 +382,8 @@ def render_one(qml: str, theme: Path | None, scenario: str, size: str, out: Path
         cmd.append("--config=" + json.dumps(config, ensure_ascii=False))
     if me:
         cmd.append(f"--me={me}")
+    if meicon:
+        cmd.append(f"--meicon={meicon}")
     p = subprocess.run(cmd, env=offscreen_env(backend), capture_output=True, text=True, timeout=90)
     log = (p.stdout + p.stderr).strip().splitlines()
     noise = [l for l in log if not l.startswith(("qml: sumi-sddm: ready", "qml: render: saved"))]
@@ -392,6 +395,16 @@ def my_display_name() -> str:
         gecos = pwd.getpwuid(os.getuid()).pw_gecos.split(",")[0].strip()
         return gecos or pwd.getpwuid(os.getuid()).pw_name
     except KeyError:
+        return ""
+
+
+def my_avatar() -> str:
+    """El avatar de AccountsService si la pantalla de inicio podrá leerlo; "" si no (la vista previa no inventa)."""
+    try:
+        from sumiconf import avatar
+        st = avatar.status()
+        return st["sddmUses"] if st["sddmUses"] else ""
+    except (ConfigError, OSError, subprocess.SubprocessError):
         return ""
 
 
@@ -416,7 +429,7 @@ def cmd_preview(args) -> int:
             tried = ["opengl", "software"] if args.backend == "auto" else [args.backend]
             for backend in tried:
                 ok, noise = render_one(qt_tool("qml"), target, args.scenario, args.size, out, backend,
-                                       raw_for_qml(schema, vals), my_display_name())
+                                       raw_for_qml(schema, vals), my_display_name(), my_avatar())
                 if ok or not any(m in l for l in noise for m in GL_FAILURE):
                     break
     except ConfigError as exc:
@@ -444,6 +457,65 @@ def cmd_try(args) -> int:
         if exc.code == "busy":
             return fail("ya hay una ventana de prueba abierta", code="busy")
         return fail_exc(exc, False)
+
+
+# ── Avatar (AccountsService, sin root) ───────────────────────────────────────────────────────────────────
+def crop_avatar(src_fd: int, out: Path, size: int) -> None:
+    """PNG cuadrado SIZE×SIZE (centrado y recortado) con Qt offscreen; la entrada es una copia privada."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    work = out.with_name(".src-" + out.name)
+    with os.fdopen(os.dup(src_fd), "rb") as fin, open(work, "wb") as fout:
+        fin.seek(0)
+        shutil.copyfileobj(fin, fout)
+    try:
+        if out.exists():
+            out.unlink()
+        p = subprocess.run([qt_tool("qml"), str(paths.HARNESS / "AvatarCrop.qml"), "--", f"--src={work}",
+                            f"--out={out}", f"--size={size}"], env=offscreen_env("software"),
+                           capture_output=True, text=True, timeout=60)
+        if p.returncode != 0 or not out.is_file():
+            raise ConfigError("no se pudo recortar la imagen: " + (p.stdout + p.stderr).strip()[-300:], code="io")
+    finally:
+        work.unlink(missing_ok=True)
+
+
+def cmd_avatar(args) -> int:
+    from sumiconf import avatar
+    j = args.json
+    try:
+        if args.op == "info":
+            st = avatar.status()
+            emit(st, j, (f"avatar: {st['iconFile']}" if st["exists"] else "sin avatar en AccountsService")
+                 + (" · la pantalla de inicio lo verá" if st["sddmUses"] else " · la pantalla de inicio usará las iniciales"))
+            return 0
+        obj = avatar.user_object()
+        if args.op == "clear":
+            avatar.set_icon(obj, "")
+            emit({"iconFile": avatar.icon_file(obj)}, j, "avatar quitado: la pantalla de inicio usará las iniciales")
+            return 0
+        fd = image.open_regular(Path(args.file).expanduser())
+        try:
+            info = image.inspect_fd(fd, image.AVATAR_MIN_SIDE)
+            out = paths.cache_dir() / "avatar" / "avatar.png"
+            for size in (512, 384, 256):
+                crop_avatar(fd, out, size)
+                if out.stat().st_size <= avatar.MAX_ICON_BYTES:
+                    break
+            else:
+                raise ConfigError("la imagen recortada sigue siendo demasiado grande para AccountsService")
+        finally:
+            os.close(fd)
+        os.chmod(out, 0o644)
+        avatar.set_icon(obj, str(out))
+        st = avatar.status()
+        if not st["exists"]:
+            raise ConfigError("AccountsService aceptó la orden pero no guardó el avatar", code="io")
+        emit({**st, "source": {"kind": info.kind, "width": info.width, "height": info.height}, "size": size}, j,
+             f"avatar guardado en {st['iconFile']} ({size}×{size})"
+             + (" · la pantalla de inicio lo verá" if st["sddmUses"] else ""))
+        return 0
+    except ConfigError as exc:
+        return fail_exc(exc, j)
 
 
 # ── Sistema: el helper con pkexec (Fase 5) ───────────────────────────────────────────────────────────────
@@ -769,6 +841,16 @@ def main() -> int:
     x = wsub.add_parser("info")
     x.add_argument("--json", action="store_true")
     w.set_defaults(func=cmd_wallpaper)
+
+    av = sub.add_parser("avatar", help="tu avatar en la pantalla de inicio (AccountsService)")
+    avsub = av.add_subparsers(dest="op", required=True)
+    x = avsub.add_parser("set")
+    x.add_argument("file")
+    x.add_argument("--json", action="store_true")
+    for name in ("info", "clear"):
+        x = avsub.add_parser(name)
+        x.add_argument("--json", action="store_true")
+    av.set_defaults(func=cmd_avatar)
 
     sy = sub.add_parser("system", help="tema instalado en el sistema (helper con pkexec)")
     sysub = sy.add_subparsers(dest="op", required=True)
