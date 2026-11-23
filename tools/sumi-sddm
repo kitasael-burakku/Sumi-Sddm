@@ -64,6 +64,7 @@ BACKENDS = {
     "software": {},
     "opengl": {"QT_QUICK_BACKEND": "rhi", "QSG_RHI_BACKEND": "opengl"},
 }
+GL_FAILURE = ("Failed to create RHI", "Failed to create QRhi", "QRhiGles2", "Failed to initialize graphics backend")
 HEADER = ("Sumi SDDM — configuración del usuario. Escrito por `sumi-sddm config`;\n"
           "las claves y sus valores están documentados en docs/CONFIG.md.")
 
@@ -381,13 +382,20 @@ def cmd_preview(args) -> int:
             out.parent.mkdir(parents=True, exist_ok=True)
             if out.exists():
                 out.unlink()
-            ok, noise = render_one(qt_tool("qml"), target, args.scenario, args.size, out, args.backend,
-                                   raw_for_qml(schema, vals), my_display_name())
+            # auto: OpenGL (blur y sombras como en el greeter) y, si no hay contexto gráfico (sin GPU accesible,
+            # sesión remota, banco sin pantalla), el renderizador software, que el tema también admite.
+            tried = ["opengl", "software"] if args.backend == "auto" else [args.backend]
+            for backend in tried:
+                ok, noise = render_one(qt_tool("qml"), target, args.scenario, args.size, out, backend,
+                                       raw_for_qml(schema, vals), my_display_name())
+                if ok or not any(m in l for l in noise for m in GL_FAILURE):
+                    break
     except ConfigError as exc:
         return fail_exc(exc, j)
     if not ok:
         return fail("no se pudo generar la vista previa: " + " | ".join(noise[-5:]), j, code="render")
-    emit({"png": str(out), "scenario": args.scenario, "size": args.size, "stamp": stamp}, j, str(out))
+    emit({"png": str(out), "scenario": args.scenario, "size": args.size, "stamp": stamp, "backend": backend}, j,
+         str(out))
     return 0
 
 
@@ -648,7 +656,8 @@ def main() -> int:
     p.add_argument("--out")
     p.add_argument("--scenario", default="expanded", choices=SCENARIOS)
     p.add_argument("--size", default="1920x1080")
-    p.add_argument("--backend", default="opengl", choices=list(BACKENDS))
+    p.add_argument("--backend", default="auto", choices=["auto", *BACKENDS],
+                   help="auto: OpenGL y, si no hay contexto gráfico, software")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_preview)
 

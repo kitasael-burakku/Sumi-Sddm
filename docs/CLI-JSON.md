@@ -64,7 +64,7 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 | `wallpaper set ARCHIVO [--expect S] --json` | `background`, `width`, `height`, `kind`, `bytes`, `stamp` |
 | `wallpaper clear [--expect S] --json` | `stamp` |
 | `wallpaper info --json` | `background`; si hay imagen, además `file`, `width`, `height`, `kind`, `bytes` |
-| `preview [--scenario S] [--size AxH] [--out PNG] --json` | `png`, `scenario`, `size` y `stamp` (de la configuración con la que se generó) |
+| `preview [--scenario S] [--size AxH] [--out PNG] [--backend auto\|opengl\|software] --json` | `png`, `scenario`, `size`, `stamp` (de la configuración con la que se generó) y `backend` (el que se usó: `auto` prueba OpenGL y, sin contexto gráfico, software, sin blur ni sombras) |
 | `install --status --json` | `launcher`, `installed`, `release`, `foreign` |
 | `install --user --json` | `version`, `release`, `launcher`, `previous`, `removed` |
 | `uninstall --user --json` | `removed`, `kept` (la configuración, que no se borra) |

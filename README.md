@@ -4,8 +4,8 @@ Tema de inicio de sesión para SDDM (≥ 0.21, Qt 6): minimalista, con una notch
 autenticación. Compatible con Sumi Shell, pero **independiente**: no usa Quickshell, Hyprland ni ningún
 servicio de Sumi.
 
-> Estado: Fase 4 en curso (parte A: contrato JSON e instalación de usuario de la CLI). El tema **no está instalado
-> ni activado** en el sistema.
+> Estado: Fase 4 en curso: parte A hecha (contrato JSON, `install --user`); parte B (Settings de Sumi Shell)
+> preparada y probada, sin entregar. El tema **no está instalado ni activado** en el sistema.
 
 ## Estructura
 
@@ -24,6 +24,7 @@ tools/sumi-sddm            CLI (sin privilegios): config, wallpaper, preview, tr
 tools/sumiconf/            esquema, validación estricta/tolerante, INI de QSettings, imágenes, rutas,
                            huella y bloqueo (state.py), instalación de usuario (install.py)
 tools/harness/             dobles de SDDM y Render.qml (vista previa y capturas)
+integration/sumi-shell/     Settings → Login screen para Sumi Shell (servicio, controles, edit.py, deliver.py, banco)
 tests/py/                  pruebas de sumiconf y de la CLI
 tests/qml/                 pruebas del Greeter y de la paridad de configuración (qmltestrunner)
 tests/fixtures/            casos compartidos Python/QML y theme.conf.user de prueba

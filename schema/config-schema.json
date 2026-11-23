@@ -19,7 +19,7 @@
       "doc": "Imagen de fondo. Vacío = fondo «tinta» generado en QML. Ruta relativa al tema (backgrounds/…) o absoluta bajo /usr/share; debe ser legible por el usuario «sddm». Con `sumi-sddm wallpaper set` se gestiona sola.",
       "extensions": ["jpg", "jpeg", "png", "webp"] },
     { "key": "backgroundFill", "group": "background", "type": "enum", "default": "crop", "values": ["crop", "fit", "stretch"],
-      "label": "Fit", "doc": "Encaje de la imagen: crop (llenar recortando), fit (completa, con bandas), stretch." },
+      "label": "Scaling", "doc": "Encaje de la imagen: crop (llenar recortando), fit (completa, con bandas), stretch." },
     { "key": "blurRadius", "group": "background", "type": "number", "default": 0, "min": 0, "max": 100, "step": 1,
       "label": "Blur", "help": "Only applies to a wallpaper", "doc": "Desenfoque del wallpaper, 0–100 (0 = nada). No se aplica al fondo generado ni con el renderizador software." },
     { "key": "dimOpacity", "group": "background", "type": "number", "default": 0.2, "min": 0, "max": 0.85, "step": 0.05,

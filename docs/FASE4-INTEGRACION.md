@@ -42,3 +42,74 @@ Cómo funciona `install --user` (A4):
 - **«Sistema» en `config fonts`** significa «fuera de tu `$HOME`». No se comprueba con el fontconfig del
   usuario `sddm`.
 - **Bloqueos `busy`.** Una operación que no consigue el bloqueo espera 5 s antes de responder `busy`.
+
+## Parte A, posterior: `install --user` real y vista previa sin GPU (2026-11-22)
+
+- **`install --user` en tu HOME**, con tu autorización: `~/.local/bin/sumi-sddm` (lanzador) y
+  `~/.local/share/sumi-sddm/releases/`. Desde entonces se ha reinstalado dos veces para recoger las correcciones de
+  abajo, y conserva la versión anterior. `~/.config/sumi-sddm` sigue sin existir: leer no lo crea.
+- **Vista previa sin GPU.** El banco de la parte B descubrió que `preview` fallaba sin contexto gráfico, porque
+  OpenGL offscreen no tiene contexto sin variables de sesión. Ahora `--backend auto` es el defecto: prueba OpenGL y,
+  si no hay contexto, usa el renderizador software, sin blur ni sombras. La respuesta dice el `backend` usado. En tu
+  sesión sigue saliendo OpenGL. Hay una prueba nueva (48 en Python).
+- **Esquema:** la etiqueta de `backgroundFill` pasa de «Fit», que era también una de sus opciones, a «Scaling».
+
+## Parte B — Settings → Desktop tools → Login screen (2026-11-22), preparada y probada, sin entregar
+
+Fuentes en [`integration/sumi-shell/`](../integration/sumi-shell/README.md). El trabajo privado está en
+`~/Projects/Quickshell/.sddm-settings-20261122/`, ignorado por su propio `.gitignore`, así que el `.gitignore` del
+repo no se tocó. El árbol vivo, dotfiles y el repo de Quickshell siguen sin cambios (`git status` limpio).
+
+Bases tomadas del vivo y de la fuente justo antes de preparar la entrega: son idénticas en las 7 rutas modificadas.
+Incluyen el trabajo sin commitear de la navegación de Settings, y la entrega va encima de él.
+
+**La página.** Cinco pestañas:
+
+| Pestaña | Contenido |
+|---|---|
+| Overview | estado de Sumi SDDM, si está instalado en el sistema, vista previa con escena (Compact, Password, Sessions, Error) y «Test window» con doble pulsación; Reset con doble pulsación y Restore |
+| Look | fondo, colores, tipografía |
+| Notch and clock | notch y reloj |
+| Users and power | usuarios y energía |
+| Behaviour | movimiento y comportamiento |
+
+- **Filas.** Una fila por cada una de las 41 claves, con el control según su tipo, marca de personalizado y botón de
+  restablecer. Teclado: ←/→ y Enter.
+- **Sin CLI.** Si falta o es incompatible, cada sección dice por qué y las acciones quedan desactivadas.
+
+**Detalles que importan.**
+- **Las filas no se rehacen al arrastrar.** Las filas de claves dependen del esquema y de los avisos, no de los
+  valores, así que un deslizador no se rehace mientras se arrastra (probado).
+- **El `--expect` se toma al lanzar.** La huella se toma al lanzar cada escritura, no al encolarla. Así una
+  escritura propia anterior nunca provoca un conflicto falso.
+- **Sin cuelgues si falta la CLI.** Se lanza `/usr/bin/env sumi-sddm`: si falta, `exited` llega con 127. Con un
+  binario inexistente, `Process` no emitiría `exited` (PROCEDIMIENTOS §5).
+
+### Pruebas
+
+| Prueba | Resultado |
+|---|---|
+| Banco `real` (CLI de verdad sobre XDG privado). Comprueba: carga, pestañas, clic en un interruptor, persistencia en disco, arrastre (12 movimientos = 1 escritura y la fila sobrevive), teclado, restablecer una clave, conflicto con un cambio externo (no se pisa y se recarga), valor rechazado (se dice y se revierte), wallpaper, Reset/Restore, Test window solo armada y soltar al salir | 48/48, 0 avisos QML |
+| Banco `missing` / `incompatible` | 12/12 cada uno, 0 avisos |
+| Banco `terminal` (estilo Terminal, texto 1,15) | 13/13, 0 avisos; capturas revisadas |
+| Recarga en caliente: árbol de antes → rutas de la entrega → `Quickshell.reload` | 2 cargas, 48/48, 0 avisos |
+| `settings.json` de la shell tras cada escenario | intacto (sin rastro de sddm) |
+| `deliver.py check` / `self-test` / `apply` en seco | las 20 rutas (10 × 2 árboles) en base; entrega, vuelta atrás en seco y real, rechazo de ediciones posteriores y concurrentes: OK |
+| Candidato de la entrega frente al probado en el banco | idéntico byte a byte en las 10 rutas |
+| Sonda `login.sddmTheme` con la CLI real, sin CLI y con api 2 | available / unavailable con su motivo |
+| `qmllint --bare` | sin errores (los avisos de importación son de `--bare`, igual que en la base) |
+
+### Límites y pendientes
+
+- **No se ha entregado.** Escribir en el vivo y en dotfiles necesita tu autorización específica, la tercera.
+  `deliver.py apply --apply`:
+  1. comprueba que la sesión esté desbloqueada;
+  2. respalda en `~/.local/state/sumi-sddm-settings-20261122-*/`;
+  3. escribe y recarga;
+  4. exige una «Configuration Loaded» limpia, el mismo PID, `NRestarts` igual y `settings.json` intacto;
+  5. si algo falla, revierte solo.
+- **Banco de la navegación.** `tools/settings-navigation/checks.js` de Quickshell espera 31 páginas. Con esta
+  serían 32: si se vuelve a ejecutar, hay que actualizar esa cifra. No lo he tocado.
+- **«Test window»** sólo se probó armada: abrirla toma el teclado.
+- **Vista previa del banco.** Usa el renderizador software, sin GPU. En tu sesión saldrá OpenGL, con blur.
+- **Commit en dotfiles.** Tras la entrega, el commit en dotfiles es tuyo (`dotbackup`), como siempre.

@@ -146,7 +146,18 @@ class StampTest(Base):
         s2 = self.ok("wallpaper", "set", str(b), "--expect", s1)["stamp"]
         self.assertNotEqual(s1, s2, "misma ruta (backgrounds/user.png), otra imagen: otra huella")
         self.err("conflict", "wallpaper", "set", str(a), "--expect", s1)
-        self.assertEqual(self.ok("preview", "--backend", "software", "--size", "640x360")["stamp"], s2)
+        pv = self.ok("preview", "--backend", "software", "--size", "640x360")
+        self.assertEqual((pv["stamp"], pv["backend"]), (s2, "software"))
+
+    def test_preview_auto_falls_back_without_graphics_context(self):
+        # Sin variables de sesión gráfica, OpenGL offscreen no tiene contexto: auto debe acabar en software.
+        env = {k: v for k, v in self.env.items() if k not in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR")}
+        p = subprocess.run([sys.executable, "-B", str(CLI), "preview", "--size", "640x360", "--json"], env=env,
+                           capture_output=True, text=True, timeout=120)
+        doc = json.loads(p.stdout)
+        self.assertTrue(doc["ok"], doc)
+        self.assertIn(doc["backend"], ("opengl", "software"))
+        self.assertTrue(Path(doc["png"]).is_file())
 
 
 class LockTest(Base):
