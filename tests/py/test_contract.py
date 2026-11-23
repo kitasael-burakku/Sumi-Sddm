@@ -260,6 +260,7 @@ class InstallTest(Base):
             self.assertNotIn("__pycache__", p.parts, p)
         self.assertFalse((rel / "tests").exists())
         self.assertFalse(any(rel.rglob("theme.conf.user")))
+        self.assertTrue((rel / "docs" / "CONFIG.md").is_file())   # `config show` la enlaza
         # La copia instalada funciona por el lanzador, sin el repositorio.
         self.assertEqual(self.ok("version", exe=str(L))["kind"], "user")
         self.ok("config", "set", "clockFormat=12h", exe=str(L))

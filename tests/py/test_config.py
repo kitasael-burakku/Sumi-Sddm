@@ -171,6 +171,15 @@ class IniTest(unittest.TestCase):
         with self.assertRaises(ConfigError):
             ini.validate(self.s, ini.parse("[General]\nevil=1\n"))
 
+    def test_unknown_key_suggestion(self):
+        self.assertEqual(self.s.suggest("notchradius"), "notchRadius")
+        self.assertEqual(self.s.suggest("acentColor"), "accentColor")
+        self.assertEqual(self.s.suggest("evil"), "")
+        with self.assertRaisesRegex(ConfigError, "¿quisiste decir «clockFormat»?"):
+            self.s.entry("clockformat")
+        with self.assertRaisesRegex(ConfigError, "config schema"):
+            self.s.entry("evil")
+
     def test_comments_and_blank_lines(self):
         self.assertEqual(ini.parse("; c\n# c\n\n[General]\n; x\nnotchRadius = 30 \n"), {"notchRadius": "30"})
 
@@ -261,6 +270,7 @@ class CliTest(unittest.TestCase):
         self.home = Path(self.tmp.name)
         self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / "cfg"),
                         XDG_CACHE_HOME=str(self.home / "cache"))
+        self.env.pop("VISUAL", None)   # tiene prioridad sobre EDITOR en `config edit`
         self.conf = self.home / "cfg" / "sumi-sddm" / "theme.conf.user"
 
     def tearDown(self):
@@ -317,6 +327,90 @@ class CliTest(unittest.TestCase):
         r = self.js("config", "validate", ok=False)
         self.assertIn("notchRadius", r["error"])
         self.js("config", "show", ok=False)
+
+    def edit(self, script: str, ok=True):
+        """`config edit` con un «editor» de prueba: un script de Python que recibe la ruta del archivo."""
+        ed = self.home / "editor.py"
+        ed.write_text("import sys, pathlib\np = pathlib.Path(sys.argv[1])\nt = p.read_text()\n" + script)
+        self.env["EDITOR"] = f"{sys.executable} -B {ed}"
+        return self.run_cli("config", "edit", ok=ok)
+
+    def edit_leftovers(self):
+        return list((self.home / "cache" / "sumi-sddm" / "edit").glob("edit-*"))
+
+    def test_edit_saves_normalized(self):
+        self.js("config", "set", "notchRadius=30")
+        p = self.edit("t = t.replace(';clockFormat=24h', 'clockFormat=12H')\n"
+                      "t = t.replace('notchRadius=30', ';notchRadius=30')\n"
+                      "assert 'Radio' in t or 'notch' in t.lower()\np.write_text(t)\n")
+        self.assertIn("guardado", p.stdout)
+        self.assertEqual(self.js("config", "get", "clockFormat")["value"], "12h")
+        self.assertFalse(self.js("config", "show")["values"]["notchRadius"]["set"])
+        self.assertEqual(self.edit_leftovers(), [])
+
+    def test_edit_buffer_lists_every_key(self):
+        self.js("config", "set", "notchRadius=30")
+        out = self.home / "seen.ini"
+        self.edit(f"pathlib.Path({str(out)!r}).write_text(t)\n")
+        seen = out.read_text()
+        body = ini.parse(seen)
+        self.assertEqual(body, {"notchRadius": "30"})           # sólo lo personalizado está activo
+        for k in Schema.load().order:
+            self.assertIn(k, seen)
+
+    def test_edit_invalid_writes_nothing_and_keeps_buffer(self):
+        self.js("config", "set", "notchRadius=30")
+        before = self.conf.read_bytes()
+        p = self.edit("p.write_text(t.replace('notchRadius=30', 'notchRadius=999'))\n", ok=False)
+        self.assertIn("fuera de rango", p.stderr)
+        self.assertEqual(self.conf.read_bytes(), before)
+        left = self.edit_leftovers()
+        self.assertEqual(len(left), 1)
+        self.assertIn(str(left[0]), p.stderr)
+
+    def test_edit_unknown_key_suggests(self):
+        p = self.edit("p.write_text(t + 'accentcolor=\"#ffffff\"\\n')\n", ok=False)
+        self.assertIn("¿quisiste decir «accentColor»?", p.stderr)
+        self.assertFalse(self.conf.exists())
+
+    def test_edit_no_change_empty_and_editor_failure(self):
+        self.assertIn("sin cambios", self.edit("pass\n").stdout)
+        self.assertIn("cancelada", self.edit("p.write_text('')\n").stdout)
+        p = self.edit("sys.exit(3)\n", ok=False)
+        self.assertIn("código 3", p.stderr)
+        self.assertFalse(self.conf.exists())
+        self.assertEqual(self.edit_leftovers(), [])
+
+    def test_edit_conflict(self):
+        # Mientras el editor está abierto, otro programa escribe: no se pisa.
+        p = self.edit(f"import subprocess\n"
+                      f"subprocess.run([sys.executable, '-B', {str(CLI)!r}, 'config', 'set', 'notchRadius=40'],"
+                      f" check=True)\n"
+                      f"p.write_text(t.replace(';clockFormat=24h', 'clockFormat=12h'))\n", ok=False)
+        self.assertIn("cambió mientras editabas", p.stderr)
+        vals = self.js("config", "show")["values"]
+        self.assertEqual(vals["notchRadius"]["value"], 40)
+        self.assertFalse(vals["clockFormat"]["set"])
+
+    def test_edit_repairs_broken_file(self):
+        self.conf.parent.mkdir(parents=True)
+        self.conf.write_text("[General]\nnotchRadius=banana\n")
+        p = self.edit("assert t.startswith('; ERROR: ') and 'notchRadius' in t.split('\\n')[0]\n"
+                      "p.write_text(t.replace('notchRadius=banana', 'notchRadius=12'))\n")
+        self.assertIn("guardado", p.stdout)
+        self.assertEqual(self.js("config", "get", "notchRadius")["value"], 12)
+
+    def test_edit_without_editor(self):
+        self.env["EDITOR"] = "no-such-editor-sumi"
+        p = self.run_cli("config", "edit", ok=False)
+        self.assertIn("no encuentro el editor", p.stderr)
+
+    def test_show_points_to_docs_and_edit(self):
+        out = self.run_cli("config", "show").stdout
+        self.assertIn("sumi-sddm config edit", out)
+        self.assertIn(str(ROOT / "docs" / "CONFIG.md"), out)
+        p = self.js("config", "set", "clockformat=12h", ok=False)
+        self.assertIn("¿quisiste decir «clockFormat»?", p["error"])
 
     def test_schema_json(self):
         data = self.js("config", "schema")

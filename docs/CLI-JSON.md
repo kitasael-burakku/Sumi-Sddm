@@ -82,7 +82,8 @@ Lo que un programa (Settings de Sumi Shell u otro) puede esperar de `sumi-sddm �
 Las órdenes `system` que cambian algo pasan por `pkexec /usr/lib/sumi-sddm/sumi-sddm-helper`, que pide la
 contraseña de un administrador cada vez (Fase 5). `system status` no necesita privilegios.
 
-`try --yes` no tiene JSON: abre una ventana y devuelve el código de salida del greeter.
+`try --yes` no tiene JSON: abre una ventana y devuelve el código de salida del greeter. `config edit` tampoco: es
+interactivo (abre `$VISUAL`/`$EDITOR`). Un programa debe usar `config set|unset` con `--expect`.
 
 ## Cómo encontrar la CLI
 

@@ -8,7 +8,8 @@ sobrescribe. Formato: INI de QSettings, sección `[General]`.
 - **En el greeter** (QML) la lectura es tolerante: un valor que no se entiende vuelve al defecto y un número
   fuera de rango se acota. Una configuración rota nunca deja la pantalla inutilizable.
 - **En `sumi-sddm config`** la validación es estricta: se rechaza en vez de corregir, y el archivo se escribe
-  de forma atómica en `~/.config/sumi-sddm/theme.conf.user`.
+  de forma atómica en `~/.config/sumi-sddm/theme.conf.user`. Para editarlo a mano con la misma validación:
+  `sumi-sddm config edit` (abre `$EDITOR` con todas las claves comentadas y no guarda nada inválido).
 - Las dos lecturas se comparan con los mismos casos (`tests/fixtures/config-vectors.js`).
 
 Reglas de formato: los textos, colores y rutas se escriben entre comillas; sin comillas no se admiten `,`

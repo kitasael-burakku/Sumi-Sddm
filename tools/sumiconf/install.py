@@ -26,7 +26,7 @@ from .ini import write_atomic
 from .schema import ConfigError
 
 MARK = "# sumi-sddm user launcher v1"
-COPY = ["VERSION", "schema/config-schema.json", "theme/sumi", "tools/sumi-sddm", "tools/sumiconf", "tools/harness"]
+COPY = ["VERSION", "schema/config-schema.json", "docs/CONFIG.md", "theme/sumi", "tools/sumi-sddm", "tools/sumiconf", "tools/harness"]
 IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "theme.conf.user", "backgrounds")
 KEEP = 2
 

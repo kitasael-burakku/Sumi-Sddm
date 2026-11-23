@@ -42,6 +42,7 @@ instalado no se toca: aplicarla al sistema será trabajo del helper de la Fase 5
 tools/sumi-sddm config show                       # * = personalizado
 tools/sumi-sddm config set clockFormat=12h accentColor=#ffb38a   # valida todo o no escribe nada
 tools/sumi-sddm config unset clockFormat
+tools/sumi-sddm config edit                       # $EDITOR con todas las claves comentadas; no guarda nada inválido
 tools/sumi-sddm wallpaper set ~/Imágenes/fondo.jpg               # valida y copia; clear | info
 tools/sumi-sddm avatar set ~/Imágenes/yo.png                     # tu avatar (AccountsService, sin contraseña)
 tools/sumi-sddm preview                           # PNG en ~/.cache/sumi-sddm/preview/

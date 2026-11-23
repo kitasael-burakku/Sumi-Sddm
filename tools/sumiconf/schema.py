@@ -62,8 +62,19 @@ class Schema:
 
     def entry(self, key: str) -> dict:
         if key not in self.keys:
-            raise ConfigError(f"clave desconocida: {key}")
+            hint = self.suggest(key)
+            tail = f" (¿quisiste decir «{hint}»?)" if hint else " (lista completa: sumi-sddm config schema)"
+            raise ConfigError(f"clave desconocida: {key}{tail}")
         return self.keys[key]
+
+    def suggest(self, key: str) -> str:
+        """La clave del esquema más parecida a `key` (mayúsculas aparte, o por difflib); "" si ninguna."""
+        import difflib
+        folded = {k.casefold(): k for k in self.order}
+        if key.casefold() in folded:
+            return folded[key.casefold()]
+        close = difflib.get_close_matches(key.casefold(), list(folded), n=1, cutoff=0.75)
+        return folded[close[0]] if close else ""
 
     def defaults(self) -> dict:
         return {k: self.keys[k]["default"] for k in self.order}

@@ -11,6 +11,7 @@ Configuración del usuario (en ~/.config/sumi-sddm/; el tema instalado no se toc
   config get CLAVE                  un valor efectivo
   config set CLAVE=VALOR …          valida todo y escribe de una vez (atómico); VALOR vacío = quitar
   config unset CLAVE …              vuelve al valor por defecto
+  config edit                       abre $EDITOR con todas las claves documentadas; valida antes de guardar
   config validate [ARCHIVO] [--json]
   config reset                      guarda una copia (.prev) y vuelve a todos los defectos
   config restore                    recupera la copia .prev
@@ -46,9 +47,12 @@ import json
 import os
 import pwd
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import textwrap
 import time
 from pathlib import Path
 
@@ -59,6 +63,7 @@ from sumiconf import ConfigError, Schema, strict  # noqa: E402
 from sumiconf import gen as gen_mod  # noqa: E402
 from sumiconf import image, ini, paths, probe, state  # noqa: E402
 from sumiconf import install as install_mod  # noqa: E402
+from sumiconf.schema import to_ini  # noqa: E402
 
 ROOT = paths.ROOT
 THEME = paths.THEME
@@ -194,6 +199,8 @@ def cmd_config(args) -> int:
     j = getattr(args, "json", False)
     try:
         schema = Schema.load()
+        if args.op == "edit":
+            return config_edit(schema)
         if args.op in ("set", "unset", "reset", "restore"):
             with state.locked():
                 state.check_expect(args.expect)
@@ -250,6 +257,7 @@ def config_read(schema: Schema, args, j: bool) -> int:
                 print(f"{'*' if v['set'] else ' '} {k:22} {v['value']!r}")
             for w in font_warning(schema, user):
                 print(f"aviso: {w['message']}")
+            print(f"(* = personalizado · editar: sumi-sddm config edit · claves documentadas: {config_doc()})")
         return 0
     if op == "get":
         e = schema.entry(args.key)
@@ -303,6 +311,147 @@ def config_write(schema: Schema, args) -> str:
     if new != user:
         save_user(schema, new)
     return f"guardado en {conf}"
+
+
+def config_doc() -> str:
+    """Dónde leer qué hace cada clave: docs/CONFIG.md (está en el repositorio y en la copia de usuario)."""
+    doc = ROOT / "docs" / "CONFIG.md"
+    return str(doc) if doc.is_file() else "sumi-sddm config schema"
+
+
+# ── config edit ─────────────────────────────────────────────────────────────────────────
+EDIT_NOTE = (
+    "Sumi SDDM — edición de theme.conf.user (sumi-sddm config edit).\n"
+    "Las líneas que empiezan por «;» son comentarios. Para cambiar una clave, quita el «;» de su línea y\n"
+    "edita el valor; para volver al valor por defecto, comenta otra vez la línea o bórrala.\n"
+    "Al guardar y cerrar se valida todo: si hay un error no se escribe nada y puedes volver a editar.\n"
+    "Cerrar sin cambios, o vaciar el archivo, cancela. Para volver a todos los defectos: sumi-sddm config reset.")
+EDIT_ERROR = "; ERROR: "
+
+
+def edit_buffer(schema: Schema, user: dict) -> str:
+    """Texto que se abre en el editor: las claves personalizadas activas y el resto comentadas con su defecto."""
+    out = [";" + (" " + l if l else "") for l in EDIT_NOTE.splitlines()]
+    out += ["", f"[{schema.section}]"]
+    titles = {g["id"]: g.get("doc") or g["label"] for g in schema.groups}
+    group = None
+    for k in schema.order:
+        e = schema.keys[k]
+        if e["group"] != group:
+            group = e["group"]
+            title = f"; ── {titles[group]} "
+            out += ["", title + "─" * max(4, 72 - len(title))]
+        out.append("")
+        out += ["; " + l for l in textwrap.wrap(e["doc"], 100)]
+        out.append(f"; {gen_mod._range(e)} · defecto: {to_ini(e, e['default'])}")
+        out.append(f"{k}={to_ini(e, user[k])}" if k in user else f";{k}={to_ini(e, e['default'])}")
+    return "\n".join(out) + "\n"
+
+
+def strip_edit_errors(text: str) -> str:
+    """Quita el bloque «; ERROR: …» que se antepone al volver a abrir el editor (y su línea en blanco)."""
+    lines = text.split("\n")
+    i = 0
+    while i < len(lines) and lines[i].startswith(EDIT_ERROR):
+        i += 1
+    if i and i < len(lines) and lines[i] == "":
+        i += 1
+    return "\n".join(lines[i:])
+
+
+def with_edit_errors(body: str, message: str) -> str:
+    """Antepone los errores como comentarios. Los números de línea se corrigen para el archivo que se reabre."""
+    errors = [m for m in message.split("; ") if m]
+    shift = len(errors) + 1
+    fixed = [re.sub(r"línea (\d+)", lambda m: f"línea {int(m.group(1)) + shift}", m) for m in errors]
+    return "\n".join(EDIT_ERROR + m for m in fixed) + "\n\n" + body
+
+
+def find_editor() -> list[str]:
+    """$VISUAL, $EDITOR o el primero de nano, vim, vi. Admite argumentos («code --wait»)."""
+    for var in ("VISUAL", "EDITOR"):
+        value = os.environ.get(var, "").strip()
+        if not value:
+            continue
+        try:
+            cmd = shlex.split(value)
+        except ValueError:
+            raise ConfigError(f"no entiendo ${var}: {value}") from None
+        if cmd and shutil.which(cmd[0]):
+            return cmd
+        raise ConfigError(f"no encuentro el editor de ${var}: {cmd[0] if cmd else value}", code="missing")
+    for name in ("nano", "vim", "vi"):
+        if shutil.which(name):
+            return [name]
+    raise ConfigError("no hay ningún editor: define $EDITOR (por ejemplo, EDITOR=nano)", code="missing")
+
+
+def check_edited(schema: Schema, body: str) -> dict:
+    vals = ini.validate(schema, ini.parse(body))
+    if "background" in vals:
+        check_background(schema, vals["background"])
+    return vals
+
+
+def config_edit(schema: Schema) -> int:
+    """Edita theme.conf.user en $EDITOR. El bloqueo no se mantiene mientras el editor está abierto (Settings
+    seguiría pudiendo escribir); en su lugar, la huella del principio se comprueba al guardar, como --expect."""
+    editor = find_editor()
+    conf = paths.user_conf()
+    with state.locked(exclusive=False):
+        start = state.stamp()
+        try:
+            user = load_user(schema)
+            first, errors = edit_buffer(schema, user), ""
+        except ConfigError as exc:   # archivo roto: se abre tal cual para poder arreglarlo
+            user, first, errors = None, ini.read_file(conf), str(exc)
+    base = paths.cache_dir() / "edit"
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    work = Path(tempfile.mkdtemp(dir=base, prefix="edit-"))
+    buf = work / "theme.conf.user.ini"
+    keep = f"tu edición sigue en {buf}"
+    text = with_edit_errors(first, errors) if errors else first
+    while True:
+        buf.write_text(text, encoding="utf-8")
+        rc = subprocess.run([*editor, str(buf)]).returncode
+        if rc != 0:
+            shutil.rmtree(work, ignore_errors=True)
+            return fail(f"el editor terminó con el código {rc}; no se cambió nada")
+        try:
+            body = strip_edit_errors(buf.read_text(encoding="utf-8"))
+        except UnicodeDecodeError:
+            return fail(f"el archivo editado no es UTF-8; no se cambió nada ({keep})")
+        if body == first or not body.strip():
+            shutil.rmtree(work, ignore_errors=True)
+            print("sin cambios" if body.strip() else "archivo vacío: edición cancelada")
+            return 0
+        try:
+            new = check_edited(schema, body)
+            break
+        except ConfigError as exc:
+            if not sys.stdin.isatty():
+                return fail(f"{exc}. No se cambió nada; {keep}")
+            print(f"sumi-sddm: {exc}", file=sys.stderr)
+            try:
+                again = input("¿Volver a editar? [S/n] ").strip().lower()
+            except EOFError:
+                again = "n"
+            if again in ("n", "no"):
+                return fail(f"no se cambió nada; {keep}")
+            text = with_edit_errors(body, str(exc))
+    try:
+        with state.locked():
+            state.check_expect(start)
+            if new != user:
+                save_user(schema, new)
+    except ConfigError as exc:
+        if exc.code == "conflict":
+            return fail(f"la configuración cambió mientras editabas (otra ventana o la terminal); no se guardó. "
+                        f"{keep}", code="conflict")
+        raise
+    shutil.rmtree(work, ignore_errors=True)
+    print(f"guardado en {conf}" if new != user else "sin cambios")
+    return 0
 
 
 def cmd_wallpaper(args) -> int:
@@ -878,6 +1027,7 @@ def main() -> int:
     x = csub.add_parser("unset")
     x.add_argument("keys", nargs="+")
     writer(x)
+    csub.add_parser("edit", help="abre $EDITOR con todas las claves; valida antes de guardar (sin --json)")
     x = csub.add_parser("validate")
     x.add_argument("file", nargs="?")
     x.add_argument("--json", action="store_true")
