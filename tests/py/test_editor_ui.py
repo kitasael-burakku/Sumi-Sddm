@@ -560,6 +560,142 @@ class EditorUiFakeTest(WindowCase):
         self.assertEqual(self.log("wallpaper", "set")[0][:3], ["wallpaper", "set", wall])
         self.assertEqual(self.control("background", "pathValue").property("text"), "user.png")
 
+    # ---- fase 4: la pantalla de inicio (pkexec) --------------------------------------------------------------------
+    def system_page(self) -> None:
+        self.click(self.item("page-system"))
+        self.idle()
+
+    def text(self, name: str) -> str:
+        return str(self.item(name).property("text"))
+
+    def test_system_page_status(self):
+        self.loaded()
+        self.assertTrue(self.item("applyDot").isVisible())
+        self.assertTrue(self.item("quickApply").isVisible())
+        self.system_page()
+        self.assertFalse(self.item("scroll").isVisible())
+        self.assertEqual(self.text("installedText"), "Sumi SDDM 9.9.9 is installed")
+        self.assertEqual(self.text("activeText"), "Your login screen uses “orbital”")
+        self.assertTrue(self.text("syncText").startswith("Not applied yet"))
+        self.assertTrue(self.item("apply").isEnabled())
+        self.assertTrue(self.item("activate").isVisible())
+        self.assertFalse(self.item("deactivate").isVisible())
+        self.assertEqual(self.text("logText"), "Last login screen: Sumi started correctly")
+        self.assertEqual(self.text("recoveryCommand"), "sudo /usr/lib/sumi-sddm/sumi-sddm-helper deactivate")
+        self.assertTrue(self.item("recoveryDoc").isVisible())
+        self.assertFalse(self.item("quickApply").isVisible(), "en la página ya está el botón grande")
+        self.assertEqual(self.log("system", "status")[-1], ["system", "status", "--json"])
+        self.assertTrue(self.log("system", "log"))
+        self.item("search").setProperty("text", "dim")
+        spin(0.05)
+        self.assertTrue(self.item("scroll").isVisible(), "buscar vuelve a los ajustes")
+
+    def test_apply_from_the_page(self):
+        self.loaded()
+        self.system_page()
+        self.click(self.item("apply"))
+        self.idle()
+        self.assertEqual(self.log("system", "apply"), [["system", "apply", "--json"]])
+        self.assertEqual(self.text("message"), "Applied to the login screen")
+        self.assertTrue(self.text("syncText").startswith("Applied"))
+        self.assertFalse(self.item("apply").isEnabled())
+        self.assertFalse(self.item("applyDot").isVisible())
+
+    def test_quick_apply_after_pending_writes(self):
+        self.loaded(write_delay_ms=300)
+        self.type_in(self.control("accentColor", "hex"), "#ff8800")
+        self.click(self.item("quickApply"))
+        self.idle()
+        heads = [a[:2] for a in self.log() if a[:2] in (["config", "set"], ["system", "apply"])]
+        self.assertEqual(heads, [["config", "set"], ["system", "apply"]], "se aplica lo que se ve")
+        self.assertFalse(self.item("quickApply").isVisible())
+        self.assertTrue(self.b.system["inSync"])
+
+    def test_cancelled_password_changes_nothing(self):
+        self.state(None, deny=True)
+        self.loaded()
+        self.system_page()
+        self.click(self.item("apply"))
+        self.idle()
+        self.assertEqual(self.text("message"), "Authentication cancelled · nothing changed")
+        self.assertTrue(self.text("syncText").startswith("Not applied yet"))
+        self.click(self.item("activate"))
+        self.click(self.item("activate"))
+        self.idle()
+        self.assertEqual(self.text("activeText"), "Your login screen uses “orbital”")
+
+    def test_failed_probe_is_explained(self):
+        self.state(None, sys_fail={"code": "probe", "error": "probe failed", "problems": ["Main.qml:12: boom"]})
+        self.loaded()
+        self.system_page()
+        self.click(self.item("apply"))
+        self.idle()
+        self.assertEqual(self.text("message"),
+                         "The theme failed its test with these settings · nothing changed · Main.qml:12: boom")
+
+    def test_use_and_restore_need_two_presses(self):
+        self.loaded()
+        self.system_page()
+        use = self.item("activate")
+        self.click(use)
+        self.assertEqual(use.property("text"), "Press again to use Sumi")
+        self.assertIn("Makes Sumi your login screen the next time", self.text("switchHelp"))
+        spin(0.1)
+        self.assertEqual(self.log("system", "activate"), [])
+        self.click(use)
+        self.idle()
+        self.assertEqual(self.text("message"), "Sumi will be your login screen the next time it appears")
+        self.assertEqual(self.text("activeText"), "Sumi is your login screen")
+        restore = self.item("deactivate")
+        self.assertTrue(restore.isVisible())
+        self.assertIn("Goes back to “orbital”", self.text("switchHelp"))
+        self.click(restore)
+        self.assertEqual(restore.property("text"), "Press again to restore")
+        self.click(restore)
+        self.idle()
+        self.assertIn("Back to orbital", self.text("message"))
+        self.assertEqual(len(self.log("system", "deactivate")), 1)
+        self.assertEqual(self.text("activeText"), "Your login screen uses “orbital”")
+
+    def test_not_installed(self):
+        self.state(None, installed=False)
+        self.loaded()
+        self.assertFalse(self.item("quickApply").isVisible())
+        self.system_page()
+        self.assertTrue(self.text("notInstalled").startswith("The Sumi SDDM theme is not installed system-wide"))
+        self.assertFalse(self.item("statusGrid").isVisible())
+        self.assertFalse(self.item("apply").isVisible())
+        self.assertFalse(self.item("activate").isVisible())
+
+    def test_log_with_problems(self):
+        self.state(None, log={"greeters": [{"pid": "1", "time": 0, "theme": "file:///x/sumi/", "sumi": True,
+                                            "ok": False, "ready": "", "problems": ["no ready line", "QML error"]}]})
+        self.loaded()
+        self.system_page()
+        self.assertEqual(self.text("logText"), "Last login screen: Sumi had problems")
+        self.assertEqual(self.texts(self.item("logText").parentItem().parentItem())[-2:],
+                         ["· no ready line", "· QML error"])
+
+    def test_log_without_greeters(self):
+        self.state(None, log=None)
+        self.loaded()
+        self.system_page()
+        self.assertEqual(self.text("logText"), "No login screen has been shown since this computer started")
+
+    def test_close_waits_for_the_system_change(self):
+        self.state(None, delay={"apply": 0.6})
+        self.loaded()
+        self.system_page()
+        self.click(self.item("apply"))
+        self.assertTrue(self.item("busyRow").isVisible())
+        self.win.close()
+        spin(0.1)
+        self.assertTrue(self.win.isVisible(), "no se cierra mientras pkexec espera o trabaja")
+        self.assertEqual(self.text("message"), "The window will close when the login screen change finishes")
+        self.assertTrue(wait(lambda: not self.win.isVisible(), 5))
+        self.assertEqual(len(self.log("system", "apply")), 1)
+        self.win = None
+
     def test_close_writes_pending_changes_first(self):
         self.loaded(write_delay_ms=5000)
         self.type_in(self.control("accentColor", "hex"), "#123456")

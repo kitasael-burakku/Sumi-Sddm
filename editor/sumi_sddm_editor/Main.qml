@@ -5,13 +5,16 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 /**
- * La ventana del editor (fases 2 y 3; el panel del sistema llega en la fase 4).
+ * La ventana del editor.
  *
- * Barra lateral con los grupos del esquema y búsqueda (por etiqueta o clave, en todos los grupos); en medio, un
- * Field por clave (y el avatar, primera fila de Users); a la derecha, la vista previa, que se puede ocultar (sin
- * ella no se genera ninguna). Pie: el aviso o el error del backend, cuántas claves están personalizadas, «Restore
- * previous» y «Reset all» (dos pulsaciones). Al volver el foco se relee (`recheck`): si algo cambió desde la
- * terminal o desde Settings, se avisa. Al cerrar con escrituras pendientes, se escriben antes de salir.
+ * Barra lateral con los grupos del esquema y búsqueda (por etiqueta o clave, en todos los grupos) y, aparte, la
+ * página «Login screen» (SystemPanel: estado, Apply / Use / Restore con pkexec, último arranque, recuperación).
+ * En medio, un Field por clave (y el avatar, primera fila de Users); a la derecha, la vista previa, que se puede
+ * ocultar (sin ella no se genera ninguna). Pie: el aviso o el error del backend, «Apply to login screen» si lo
+ * guardado no está aplicado, cuántas claves están personalizadas, «Restore previous» y «Reset all» (dos
+ * pulsaciones). Al volver el foco se relee (`recheck`): si algo cambió desde la terminal o desde Settings, se
+ * avisa. Al cerrar con escrituras pendientes, se escriben antes de salir; con una operación de sistema en curso
+ * (esperando la contraseña o aplicando), la ventana espera a que termine.
  */
 ApplicationWindow {
     id: win
@@ -19,6 +22,10 @@ ApplicationWindow {
     required property var backend
 
     property string selectedGroup: ""
+    /** "settings" (grupos del esquema) o "system" (la pantalla de inicio de verdad). */
+    property string page: "settings"
+    readonly property var sys: win.backend.system
+    readonly property bool needsApply: !!(win.sys && win.sys.installed === true && win.sys.inSync === false)
     readonly property string group: win.selectedGroup.length > 0 ? win.selectedGroup
         : (win.backend.groups.length > 0 ? win.backend.groups[0].id : "")
     readonly property string query: search.text.trim().toLowerCase()
@@ -58,7 +65,12 @@ ApplicationWindow {
     }
     Binding { target: win.backend; property: "previewEnabled"; value: win.showPreview }
     onClosing: (close) => {
-        if (win.backend.busy) {
+        if (win.backend.systemBusy.length > 0) {
+            // pkexec espera una contraseña o el helper está trabajando: no se deja a medias
+            close.accepted = false;
+            win.closeWhenIdle = true;
+            win.backend.inform("The window will close when the login screen change finishes");
+        } else if (win.backend.busy) {
             close.accepted = false;
             win.closeWhenIdle = true;
             win.backend.flushNow();
@@ -66,7 +78,11 @@ ApplicationWindow {
     }
     Connections {
         target: win.backend
-        function onBusyChanged() { if (win.closeWhenIdle && !win.backend.busy) win.close(); }
+        function onBusyChanged() { win.closeIfIdle(); }
+        function onSystemBusyChanged() { win.closeIfIdle(); }
+    }
+    function closeIfIdle() {
+        if (win.closeWhenIdle && !win.backend.busy && win.backend.systemBusy.length === 0) win.close();
     }
 
     Shortcut { sequences: [StandardKey.Find]; onActivated: search.forceActiveFocus() }
@@ -140,6 +156,7 @@ ApplicationWindow {
                     Accessible.name: "Search settings"
                     Layout.fillWidth: true
                     Keys.onEscapePressed: text = ""
+                    onTextChanged: if (text.length > 0) win.page = "settings"
                 }
                 ListView {
                     id: groupList
@@ -159,17 +176,57 @@ ApplicationWindow {
                         objectName: "group-" + gd.modelData.id
                         width: ListView.view.width
                         text: gd.modelData.label + (gd.custom > 0 ? "  ·  " + gd.custom : "")
-                        highlighted: win.query.length === 0 && win.group === gd.modelData.id
+                        highlighted: win.page === "settings" && win.query.length === 0 && win.group === gd.modelData.id
                         Accessible.name: gd.modelData.label + (gd.custom > 0 ? ", " + gd.custom + " customised" : "")
-                        onClicked: { search.text = ""; win.selectedGroup = gd.modelData.id; groupList.currentIndex = gd.index; }
+                        onClicked: {
+                            search.text = "";
+                            win.page = "settings";
+                            win.selectedGroup = gd.modelData.id;
+                            groupList.currentIndex = gd.index;
+                        }
+                    }
+                }
+                MenuSeparator { Layout.fillWidth: true }
+                ItemDelegate {
+                    id: sysItem
+                    objectName: "page-system"
+                    text: "Login screen"
+                    highlighted: win.page === "system"
+                    Layout.fillWidth: true
+                    Accessible.name: "Login screen" + (win.needsApply ? ", your settings are not applied yet" : "")
+                    ToolTip.visible: hovered && win.needsApply
+                    ToolTip.text: "Your settings are not applied to the login screen yet"
+                    onClicked: { search.text = ""; win.page = "system"; }
+                    // un punto, no texto: en la barra lateral no cabe «not applied»
+                    Rectangle {
+                        objectName: "applyDot"
+                        visible: win.needsApply
+                        width: 8
+                        height: 8
+                        radius: 4
+                        color: "#e08a1e"
+                        anchors.right: parent.right
+                        anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                 }
             }
         }
 
+        Loader {
+            objectName: "systemPage"
+            active: win.page === "system"
+            visible: active
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            // se crea al abrir la página: así relee el estado y el registro cada vez
+            sourceComponent: SystemPanel { backend: win.backend }
+        }
+
         ScrollView {
             id: scroll
             objectName: "scroll"
+            visible: win.page === "settings"
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: availableWidth
@@ -249,6 +306,15 @@ ApplicationWindow {
                 text: "×"
                 Accessible.name: "Dismiss message"
                 onClicked: win.backend.dismiss()
+            }
+            Button {
+                objectName: "quickApply"
+                visible: win.needsApply && win.page !== "system"
+                enabled: win.backend.systemBusy.length === 0
+                text: win.backend.systemBusy === "apply" ? "Applying…" : "Apply to login screen"
+                highlighted: true
+                Accessible.name: "Apply your settings to the login screen"
+                onClicked: win.backend.systemApply()
             }
             BusyIndicator {
                 visible: win.backend.busy

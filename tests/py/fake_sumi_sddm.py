@@ -9,6 +9,9 @@ intactos. Lo que se puede forzar desde `state.json`:
   delay                 {verbo: segundos} antes de responder ("show", "preview", "apply", "version"…)
   busy_next             nº de escrituras siguientes que fallan con code "busy"
   deny                  `system apply|activate|deactivate` → code "denied" (polkit cancelado)
+  sys_fail              {code, error, problems?}: lo que responde `system apply|activate|deactivate` (p. ej. probe)
+  installed             False: `system status` → code "missing" (el paquete no está)
+  log                   lo que responde `system log` (por defecto, un greeter de Sumi sin problemas); None → missing
   values                {clave: texto} lo guardado (lo que cambia una «terminal» desde la prueba)
   applied               huella de lo aplicado al sistema (para inSync)
 """
@@ -180,11 +183,25 @@ def main() -> int:
         return reply({"png": str(out), "scenario": sc, "stamp": cur_stamp, "size": size})
 
     if args[:2] == ["system", "status"]:
+        if st.get("installed") is False:
+            return fail("missing", "Sumi SDDM no está instalado en el sistema")
         return reply({"installed": True, "active": st.get("active", False), "activeTheme": "sumi" if
-                      st.get("active") else "orbital", "inSync": st.get("applied") == cur_stamp, "version": "9.9.9"})
+                      st.get("active") else "orbital", "decidedBy": "/etc/sddm.conf", "previousTheme": "orbital",
+                      "inSync": st.get("applied") == cur_stamp, "version": "9.9.9", "stamp": cur_stamp})
+    if args[:2] == ["system", "log"]:
+        log = st.get("log", {"greeters": [{"pid": "1", "time": 0, "theme": "file:///usr/share/sddm/themes/sumi/",
+                                           "sumi": True, "ok": True, "ready": "ready", "problems": []}]})
+        if log is None:
+            return fail("missing", "el journal no tiene registros del greeter")
+        ok = all(g["ok"] for g in log["greeters"] if g["sumi"])
+        reply({"sumiOk": ok, "logins": {"succeeded": 1, "failed": 0}, "boot": 0, **log})
+        return 0 if ok else 1
     if args[0] == "system" and verb in ("apply", "activate", "deactivate"):
         if st.get("deny"):
             return fail("denied", "authentication cancelled")
+        if st.get("sys_fail"):
+            f = dict(st["sys_fail"])
+            return fail(f.pop("code"), f.pop("error"), **f)
         if verb == "apply":
             changed = st.get("applied") != cur_stamp
             save(lambda s: s.update(applied=cur_stamp))

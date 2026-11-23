@@ -420,6 +420,30 @@ class EditorBackendTest(unittest.TestCase):
         self.assertIn("Back to orbital", b.notice)
         self.assertFalse(b.system["active"])
 
+    def test_system_log(self):
+        b = self.loaded()
+        self.assertIsNone(b.systemLog, "no se lee hasta que se pide")
+        b.refreshLog()
+        self.idle(b)
+        self.assertTrue(b.systemLog["sumiOk"])
+        self.state(None, log={"greeters": [{"pid": "1", "time": 0, "theme": "x", "sumi": True, "ok": False,
+                                            "ready": "", "problems": ["boom"]}]})
+        b.refreshLog()
+        self.idle(b)
+        self.assertEqual(b.systemLog["greeters"][0]["problems"], ["boom"], "sale con 1 pero el documento vale")
+        self.state(None, log=None)
+        b.refreshLog()
+        self.idle(b)
+        self.assertEqual(b.systemLog, {"greeters": []}, "sin greeters en el journal no es un error")
+
+    def test_inform_and_recovery(self):
+        b = self.loaded()
+        b.set("dim", 2)                            # cualquier error previo se sustituye por el aviso
+        b.inform("Closing soon")
+        self.assertEqual((b.notice, b.error), ("Closing soon", ""))
+        self.assertEqual(b.recoveryCommand, "sudo /usr/lib/sumi-sddm/sumi-sddm-helper deactivate")
+        self.assertTrue(b.recoveryDoc.startswith("file:///") and b.recoveryDoc.endswith("RECUPERACION.md"))
+
     def test_try_window_two_presses(self):
         b = self.loaded()
         b.openTestWindow()

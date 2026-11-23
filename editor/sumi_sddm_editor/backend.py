@@ -24,13 +24,18 @@ import math
 import os
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import Property, QObject, QProcess, QTimer, QUrl, Signal, Slot
 
 API = 1
 PROGRAM = "sumi-sddm"
-DEDUP = frozenset({"show", "preview", "system", "avatar"})
+DEDUP = frozenset({"show", "preview", "system", "avatar", "log"})
+#: Guía de recuperación: la del paquete y, en el repositorio, la de docs/.
+RECOVERY_DOCS = ["/usr/share/doc/sumi-sddm/RECUPERACION.md",
+                 str(Path(__file__).resolve().parents[2] / "docs" / "RECUPERACION.md")]
+RECOVERY_COMMAND = "sudo /usr/lib/sumi-sddm/sumi-sddm-helper deactivate"
 STAMP_LEN = 32
 SCENARIOS = [{"label": "Compact", "value": "compact"}, {"label": "Password", "value": "expanded"},
              {"label": "Sessions", "value": "sessions"}, {"label": "Error", "value": "failed"}]
@@ -98,6 +103,7 @@ class Backend(QObject):
     systemChanged = Signal()
     systemBusyChanged = Signal()
     avatarChanged = Signal()
+    systemLogChanged = Signal()
     busyChanged = Signal()
     writeCountChanged = Signal()
     previewUrlChanged = Signal()
@@ -128,6 +134,7 @@ class Backend(QObject):
     system = _ro("QVariant", "system", systemChanged)               # `system status` o None
     systemBusy = _ro(str, "systemBusy", systemBusyChanged)          # "" · apply · activate · deactivate
     avatar = _ro("QVariant", "avatar", avatarChanged)               # `avatar info` o None
+    systemLog = _ro("QVariant", "systemLog", systemLogChanged)      # `system log` (último arranque) o None
     busy = _ro(bool, "busy", busyChanged)
     writeCount = _ro(int, "writeCount", writeCountChanged)          # escrituras aceptadas (diagnóstico, pruebas)
     previewUrl = _ro(str, "previewUrl", previewUrlChanged)
@@ -158,6 +165,7 @@ class Backend(QObject):
         self._fonts: list = []
         self._system: dict | None = None
         self._avatar: dict | None = None
+        self._systemLog: dict | None = None
         self._busy = False
         self._writeCount = 0
         self._previewUrl = self._previewStamp = ""
@@ -204,6 +212,15 @@ class Backend(QObject):
     @Property("QVariantList", constant=True)
     def scenarios(self) -> list:
         return SCENARIOS
+
+    @Property(str, constant=True)
+    def recoveryDoc(self) -> str:
+        """URL de la guía de recuperación instalada («» si no está)."""
+        return next((QUrl.fromLocalFile(p).toString() for p in RECOVERY_DOCS if os.path.isfile(p)), "")
+
+    @Property(str, constant=True)
+    def recoveryCommand(self) -> str:
+        return RECOVERY_COMMAND
 
     def _get_scenario(self) -> str:
         return self._scenario
@@ -425,6 +442,29 @@ class Backend(QObject):
                 self._put("system", {"installed": False, "missing": bool(doc and doc.get("code") == "missing"),
                                      "error": self._err(doc, "")})
         self._enqueue(Job("system", ["system", "status"], done))
+
+    @Slot()
+    def refreshLog(self) -> None:
+        """`system log`: qué pasó en la pantalla de inicio de este arranque (sin root, del journal)."""
+        if not self.ready:
+            return
+
+        def done(doc, _code):
+            # Sale con 1 si un greeter de Sumi tuvo problemas, pero el documento sigue siendo válido. «missing» = el
+            # journal no tiene ningún greeter en este arranque: no es un error, es que aún no se ha visto ninguno.
+            if self._ok(doc):
+                self._put("systemLog", doc)
+            elif doc and doc.get("code") == "missing":
+                self._put("systemLog", {"greeters": []})
+            else:
+                self._put("systemLog", {"error": self._err(doc, "The log could not be read")})
+        self._enqueue(Job("log", ["system", "log"], done))
+
+    @Slot(str)
+    def inform(self, text: str) -> None:
+        """Un aviso de la ventana en el mismo sitio que los del backend."""
+        self._put("error", "")
+        self._put("notice", text)
 
     @Slot()
     def refreshAvatar(self) -> None:

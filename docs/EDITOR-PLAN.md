@@ -3,7 +3,8 @@
 > Estado: **decisiones tomadas; fase 0 cerrada** (paquete 0.5.0-1 instalado y probado por el autor el 2026-11-23:
 > `/usr/bin/sumi-sddm` responde `kind: "system"`, el tema sigue activo y en sincronía; la copia de usuario se
 > quitó con `uninstall --user`). **Fase 1 hecha** (backend sin ventana, 33 pruebas). **Fase 2 hecha** (formulario). **Fase 3 hecha** (vista
-> previa, fuentes, avatar; 28 pruebas de ventana en total). Fases 4–5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
+> previa, fuentes, avatar). **Fase 4 escrita y probada con la CLI falsa** (38 pruebas de ventana en total);
+> falta la prueba real del autor (Apply / Use / Restore y cancelar la contraseña). Fase 5 sin empezar. Escrito el 2026-11-23, después de añadir `sumi-sddm config edit` y las
 > sugerencias de clave.
 
 ## Por qué
@@ -188,6 +189,19 @@ de guardar, recarga que pisa lo pendiente, apply sin esperar, Try sin dos pulsac
   («la próxima vez que se muestre la pantalla de inicio»).
 - Enlace a `RECUPERACION.md` (instalado en `/usr/share/doc/sumi-sddm/`).
 - `system log`: «Last login screen: OK / problems», con los problemas desplegables.
+
+**Cómo quedó (fase 4).** `SystemPanel.qml`, página «Login screen» aparte en la barra lateral (se crea al
+abrirla, así relee `system status` y `system log` cada vez), y en el pie «Apply to login screen» cuando lo
+guardado no está aplicado (con un punto naranja en la barra lateral).
+
+- `system log` con `code: "missing"` (ningún greeter en el journal de este arranque) no es un error: «No login
+  screen has been shown since this computer started». Sin el paquete, `system status` → `missing` y la página
+  lo explica en inglés en vez de enseñar el mensaje de la CLI.
+- La ventana no se cierra mientras una orden de `system` espera la contraseña o trabaja: avisa y se cierra al
+  terminar. `shutdown()` no mata esos procesos.
+- Recuperación: la orden de la TTY, seleccionable, y «Open the recovery guide» (la instalada en
+  `/usr/share/doc/sumi-sddm/` o, en el repositorio, `docs/RECUPERACION.md`).
+- En QML un `None` de Python llega como `undefined`, no `null`: las comprobaciones usan `!x`.
 
 ## Fases
 
