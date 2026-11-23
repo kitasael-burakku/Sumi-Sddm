@@ -207,7 +207,10 @@ guardado no está aplicado (con un punto naranja en la barra lateral).
 `deactivate`) y «Apply» (02:49:13): los dos pasaron por pkexec y funcionaron. Se quedó con `orbital` activo y los
 cambios de prueba aplicados; se volvió atrás con `sumi-sddm system rollback` + `system activate` (lo aplicado
 recuperó exactamente la huella de antes, `af29455d…`) y se igualó la configuración guardada con la restaurada.
-Faltan por probar desde el editor: «Use as login screen» y cancelar la contraseña.
+Segunda ronda (03:01): «Restore previous theme» y «Use as login screen» desde el editor, los dos bien (el segundo
+tras una contraseña incorrecta: polkit vuelve a preguntar y el editor no ve nada). Estado final: Sumi activo,
+lo aplicado = `af29455d…`, en sincronía. Falta sólo **cancelar** la contraseña (el registro no muestra ninguna
+petición cancelada: todas acabaron ejecutadas o en «contraseña incorrecta»).
 
 ## Fases
 
