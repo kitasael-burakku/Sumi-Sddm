@@ -5,11 +5,14 @@ Item {
     id: root
 
     required property string name
-    property color color: Tones.muted
-    property real size: 16
+    property color color: Tones.textSecondary
+    property real size: Tones.iconSize
 
     implicitWidth: size
     implicitHeight: size
+    // Como textura: un Shape suelto se salía del recorte de las listas desplazables (se veía sobre el pie).
+    layer.enabled: true
+    layer.smooth: true
 
     readonly property var paths: ({
         background: "M3 5h18v14H3z M3 16l5-5 4 4 3-3 6 6 M15 8h.1",
@@ -27,7 +30,9 @@ Item {
         expand: "M14 4h6v6 M20 4l-6 6 M10 20H4v-6 M4 20l6-6",
         collapse: "M20 5l-6 6 M14 5v6h6 M4 19l6-6 M4 13h6v6",
         close: "M6 6l12 12 M18 6L6 18",
-        chevron: "M7 9l5 5 5-5"
+        chevron: "M7 9l5 5 5-5",
+        alert: "M12 3L22 20H2z M12 10v4 M12 17h.1",
+        check: "M5 12.5l4.5 4.5L19 7.5"
     })
 
     Shape {
@@ -39,9 +44,9 @@ Item {
         ShapePath {
             strokeColor: root.color
             strokeWidth: 1.7
-            fillColor: Tones.unfilled
-            capStyle: ShapePath.RoundCap
-            joinStyle: ShapePath.RoundJoin
+            fillColor: Tones.transparent
+            capStyle: ShapePath.SquareCap
+            joinStyle: ShapePath.MiterJoin
             PathSvg { path: root.paths[root.name] || root.paths.behaviour }
         }
     }

@@ -16,8 +16,12 @@ ApplicationWindow {
     property bool closeWhenIdle: false
 
     readonly property QtObject tones: Tones
-    readonly property bool showSidebar: width >= 780
-    readonly property bool dockPreview: width >= 1180
+    // Columnas según lo que cada una necesita (no según un monitor): barra lateral + contenido mínimo con sus
+    // márgenes; la vista previa se acopla como tercera columna sólo si el contenido sigue cabiendo a su lado.
+    readonly property bool showSidebar: width >= Tones.sidebarWidth + Tones.contentMinWidth + Tones.contentPadding * 2
+    readonly property int previewWidth: Math.round(Math.max(Tones.previewMinWidth, Math.min(Tones.previewMaxWidth, width * 0.34)))
+    readonly property bool dockPreview: showSidebar
+        && width - Tones.sidebarWidth - previewWidth >= Tones.contentMinWidth + Tones.contentPadding * 2
     readonly property bool previewVisible: showPreview && (dockPreview || previewExpanded)
     readonly property var sys: backend.system
     readonly property bool needsApply: !!(sys && sys.installed === true && sys.inSync === false)
@@ -62,7 +66,8 @@ ApplicationWindow {
                 counts[id] = (counts[id] || 0) + 1;
             }
         }
-        if (win.backend.avatar && win.backend.avatar.exists) counts.users = (counts.users || 0) + 1;
+        // La misma definición que el pie («N customised») y que «Reset all»: claves de la configuración. El avatar
+        // vive en AccountsService (Reset all no lo toca); su fila lleva su propia marca.
         return counts;
     }
 
@@ -72,19 +77,31 @@ ApplicationWindow {
     minimumHeight: 420
     visible: true
     title: "Sumi Settings"
-    color: Tones.window
-    palette.window: Tones.window
-    palette.windowText: Tones.ink
-    palette.base: Tones.surface
-    palette.text: Tones.ink
-    palette.alternateBase: Tones.chrome
-    palette.button: Tones.control
-    palette.buttonText: Tones.ink
-    palette.brightText: Tones.onAccent
-    palette.placeholderText: Tones.muted
+    color: Tones.appBackground
+    font.family: Tones.sans
+    font.pixelSize: Tones.bodySize
+    // Lo que Fusion pinta por su cuenta (información emergente, diálogos de QML, indicadores) toma Black Frost de
+    // aquí, en la variante clara u oscura que corresponda al escritorio.
+    palette.window: Tones.appBackground
+    palette.windowText: Tones.textPrimary
+    palette.base: Tones.controlSurface
+    palette.text: Tones.textPrimary
+    palette.alternateBase: Tones.groupSurface
+    palette.button: Tones.controlSurface
+    palette.buttonText: Tones.textPrimary
+    palette.brightText: Tones.textOnAccent
+    palette.placeholderText: Tones.textMuted
     palette.highlight: Tones.accent
-    palette.highlightedText: Tones.onAccent
-    palette.mid: Tones.border
+    palette.highlightedText: Tones.textOnAccent
+    palette.light: Tones.pressedSurface
+    palette.midlight: Tones.hoverSurface
+    palette.mid: Tones.borderDefault
+    palette.dark: Tones.textMuted          // p. ej. el indicador de actividad de Fusion
+    palette.shadow: Tones.ink
+    palette.toolTipBase: Tones.overlaySurface
+    palette.toolTipText: Tones.textPrimary
+    palette.link: Tones.accent
+    palette.linkVisited: Tones.glacier
 
     SettingsCatalog { id: catalog }
 
@@ -159,32 +176,39 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.Quit, StandardKey.Close]; onActivated: win.close() }
 
     header: Pane {
-        padding: Tones.gap
-        leftPadding: Tones.padding
-        rightPadding: Tones.padding
+        implicitHeight: Tones.titleBarHeight
+        topPadding: 0
+        bottomPadding: 0
+        leftPadding: Tones.space4
+        rightPadding: Tones.space3
         background: Rectangle {
-            color: Tones.chrome
+            color: Tones.chromeBackground
             Rectangle {
                 anchors.bottom: parent.bottom
                 width: parent.width
                 height: Tones.stroke
-                color: Tones.border
+                color: Tones.borderSubtle
             }
         }
         contentItem: RowLayout {
-            spacing: Tones.inset
+            spacing: Tones.space3
             Rectangle {
-                implicitWidth: 32
-                implicitHeight: 32
-                radius: Tones.controlRadius
-                color: Tones.selected
-                SettingsIcon { name: "notch"; size: 20; color: Tones.accent; anchors.centerIn: parent }
+                implicitWidth: 28
+                implicitHeight: 28
+                radius: Tones.cornerRadius
+                color: Tones.transparent
+                border.width: Tones.stroke
+                border.color: Tones.borderDefault
+                SettingsIcon { name: "notch"; color: Tones.accent; anchors.centerIn: parent }
             }
             Label {
                 text: "Sumi Settings"
+                font.pixelSize: Tones.appTitleSize
                 font.weight: Font.DemiBold
-                font.pointSize: Tones.uiFont.pointSize * Tones.headingScale
+                color: Tones.textPrimary
+                elide: Text.ElideRight
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
             }
             ActionButton {
                 objectName: "quickApply"
@@ -217,8 +241,8 @@ ApplicationWindow {
         objectName: "statusPage"
         visible: !win.backend.ready
         anchors.centerIn: parent
-        width: Math.min(parent.width - Tones.gutter * 2, 520)
-        spacing: Tones.inset
+        width: Math.min(parent.width - Tones.space6 * 2, 520)
+        spacing: Tones.space3
 
         BusyIndicator {
             running: win.backend.status === "" || win.backend.status === "checking"
@@ -231,8 +255,10 @@ ApplicationWindow {
                 : win.backend.status === "incompatible" ? "This sumi-sddm is a different version"
                 : win.backend.status === "broken" ? "sumi-sddm did not answer as expected"
                 : "Loading…"
-            font.pointSize: Tones.uiFont.pointSize * Tones.headingScale
+            font.pixelSize: Tones.sectionHeadingSize
             font.weight: Font.DemiBold
+            color: win.backend.status === "missing" || win.backend.status === "incompatible"
+                || win.backend.status === "broken" ? Tones.error : Tones.textPrimary
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
             Layout.fillWidth: true
@@ -245,7 +271,7 @@ ApplicationWindow {
             visible: text.length > 0 && win.backend.status !== "checking"
             wrapMode: Text.Wrap
             horizontalAlignment: Text.AlignHCenter
-            color: Tones.muted
+            color: Tones.textSecondary
             Layout.fillWidth: true
         }
         ActionButton {
@@ -264,23 +290,26 @@ ApplicationWindow {
         objectName: "search"
         placeholderText: "Search settings"
         Accessible.name: placeholderText
-        leftPadding: Tones.inset + lens.implicitWidth + Tones.gap
-        rightPadding: clearSearch.visible ? clearSearch.width + Tones.small : Tones.inset
+        leftPadding: Tones.space3 + lens.implicitWidth + Tones.space2
+        rightPadding: clearSearch.visible ? clearSearch.width + Tones.space1 : Tones.space3
         Keys.onEscapePressed: clear()
         onTextChanged: if (text.length > 0) { win.previewExpanded = false; win.page = "settings"; }
         SettingsIcon {
             id: lens
             name: "search"
+            color: Tones.textMuted
             anchors.left: parent.left
-            anchors.leftMargin: Tones.inset
+            anchors.leftMargin: Tones.space3
             anchors.verticalCenter: parent.verticalCenter
         }
         ActionButton {
             id: clearSearch
             visible: search.text.length > 0
             width: height
-            height: search.height
+            height: search.height - 2 * Tones.stroke
             anchors.right: parent.right
+            anchors.rightMargin: Tones.stroke
+            anchors.verticalCenter: parent.verticalCenter
             glyph: "close"
             flat: true
             Accessible.name: "Clear search"
@@ -297,21 +326,23 @@ ApplicationWindow {
         Pane {
             visible: win.showSidebar
             Layout.fillHeight: true
-            Layout.preferredWidth: 240
-            Layout.minimumWidth: 240
-            padding: Tones.inset
-            topPadding: Tones.padding
+            Layout.preferredWidth: Tones.sidebarWidth
+            Layout.minimumWidth: Tones.sidebarWidth
+            Layout.maximumWidth: Tones.sidebarWidth
+            padding: Tones.space3
+            topPadding: Tones.space4
+            rightPadding: Tones.space3 + Tones.stroke
             background: Rectangle {
-                color: Tones.chrome
+                color: Tones.sidebarBackground
                 Rectangle {
                     anchors.right: parent.right
                     width: Tones.stroke
                     height: parent.height
-                    color: Tones.border
+                    color: Tones.borderSubtle
                 }
             }
             contentItem: ColumnLayout {
-                spacing: Tones.padding
+                spacing: Tones.space4
                 Item {
                     id: sidebarSearch
                     Layout.fillWidth: true
@@ -329,7 +360,7 @@ ApplicationWindow {
                         padding: 0
                         background: null
                         contentItem: ColumnLayout {
-                            spacing: Tones.small
+                            spacing: 0
                             Repeater {
                                 id: navSectionsRepeater
                                 model: win.navSections
@@ -340,15 +371,9 @@ ApplicationWindow {
                                     readonly property alias links: navLinks
                                     visible: modelData.groups.length > 0
                                     Layout.fillWidth: true
-                                    Layout.topMargin: index > 0 ? Tones.padding : 0
-                                    spacing: Tones.small
-                                    Label {
-                                        text: navSection.modelData.title
-                                        color: Tones.muted
-                                        font.weight: Font.DemiBold
-                                        font.pointSize: Tones.uiFont.pointSize * Tones.captionScale
-                                        Layout.leftMargin: Tones.inset
-                                    }
+                                    Layout.topMargin: index > 0 ? Tones.space4 : 0
+                                    spacing: 0
+                                    NavOverline { text: navSection.modelData.title }
                                     Repeater {
                                         id: navLinks
                                         model: navSection.modelData.groups
@@ -370,14 +395,7 @@ ApplicationWindow {
                                     }
                                 }
                             }
-                            Label {
-                                text: "System"
-                                color: Tones.muted
-                                font.weight: Font.DemiBold
-                                font.pointSize: Tones.uiFont.pointSize * Tones.captionScale
-                                Layout.leftMargin: Tones.inset
-                                Layout.topMargin: Tones.padding
-                            }
+                            NavOverline { text: "System"; Layout.topMargin: Tones.space4 }
                             NavigationItem {
                                 id: sysItem
                                 objectName: "page-system"
@@ -405,13 +423,13 @@ ApplicationWindow {
 
             RowLayout {
                 visible: !win.showSidebar
-                spacing: Tones.gap
+                spacing: Tones.space2
                 Layout.fillWidth: true
-                Layout.margins: Tones.inset
+                Layout.margins: Tones.contentPaddingCompact
                 Layout.bottomMargin: 0
                 ChoiceBox {
                     objectName: "sectionPicker"
-                    Layout.preferredWidth: 144
+                    Layout.preferredWidth: Math.min(168, Math.max(120, implicitWidth))
                     model: win.compactChoices
                     textRole: "label"
                     valueRole: "id"
@@ -446,15 +464,16 @@ ApplicationWindow {
                 Item {
                     width: settingsScroll.availableWidth
                     implicitHeight: settingsContent.implicitHeight + gutter * 2
-                    readonly property int gutter: width >= 440 ? Tones.gutter : Tones.padding
+                    readonly property int gutter: width >= Tones.contentMinWidth + Tones.contentPadding * 2
+                        ? Tones.contentPadding : Tones.contentPaddingCompact
 
                     ColumnLayout {
                         id: settingsContent
                         objectName: "settingsContent"
                         anchors.horizontalCenter: parent.horizontalCenter
                         y: parent.gutter
-                        width: Math.min(760, parent.width - parent.gutter * 2)
-                        spacing: Tones.sectionGap
+                        width: Math.min(Tones.contentMaxWidth, parent.width - parent.gutter * 2)
+                        spacing: Tones.space8
 
                         NumberAnimation on opacity {
                             id: pageTransition
@@ -462,17 +481,18 @@ ApplicationWindow {
                             from: 0.76
                             to: 1
                             easing.type: Tones.easing
-                            duration: Tones.duration
+                            duration: Tones.navDuration
                         }
                         Connections {
                             target: win
-                            function onGroupChanged() { if (!win.searching && Tones.duration) pageTransition.restart(); }
+                            function onGroupChanged() { if (!win.searching && Tones.motion) pageTransition.restart(); }
                         }
                         SectionHeader {
                             Layout.fillWidth: true
                             title: win.searching ? (win.resultCount === 1 ? "1 result" : win.resultCount + " results")
                                 : win.groupLabel
-                            description: win.searching ? "" : (catalog.descriptions[win.group] || "")
+                            description: win.searching ? "Settings matching “" + search.text.trim() + "”, by page"
+                                : (catalog.descriptions[win.group] || "")
                         }
                         Repeater {
                             id: groupsRepeater
@@ -506,9 +526,11 @@ ApplicationWindow {
                             }
                         }
                         Label {
+                            objectName: "noResults"
                             visible: win.searching && win.resultCount === 0
-                            text: "Nothing matches “" + search.text.trim() + "”"
-                            color: Tones.muted
+                            text: "Nothing matches “" + search.text.trim() + "”. Try a shorter word, or clear the search "
+                                + "to browse the pages."
+                            color: Tones.textSecondary
                             wrapMode: Text.Wrap
                             Layout.fillWidth: true
                         }
@@ -527,33 +549,45 @@ ApplicationWindow {
             onToggleExpanded: win.previewExpanded = !win.previewExpanded
             Layout.fillHeight: true
             Layout.fillWidth: win.previewExpanded
-            Layout.preferredWidth: Math.max(480, Math.min(560, win.width * 0.37))
+            Layout.preferredWidth: win.previewWidth
+            Layout.minimumWidth: win.previewExpanded ? 0 : Tones.previewMinWidth
 
             opacity: visible ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: Tones.duration; easing.type: Tones.easing } }
+            Behavior on opacity { NumberAnimation { duration: Tones.previewDuration; easing.type: Tones.easing } }
         }
     }
 
     footer: Pane {
         visible: win.backend.ready
-        padding: visible ? Tones.gap : 0
-        leftPadding: Tones.padding
-        rightPadding: Tones.padding
+        topPadding: visible ? Tones.space1 + Tones.stroke : 0
+        bottomPadding: visible ? Tones.space1 : 0
+        leftPadding: Tones.space4
+        rightPadding: Tones.space3
         background: Rectangle {
-            color: Tones.chrome
-            Rectangle { width: parent.width; height: Tones.stroke; color: Tones.border }
+            implicitHeight: Tones.footerHeight
+            color: Tones.chromeBackground
+            Rectangle { width: parent.width; height: Tones.stroke; color: Tones.borderSubtle }
         }
 
         contentItem: ColumnLayout {
-            spacing: Tones.small
+            spacing: 0
             RowLayout {
                 visible: message.text !== ""
+                spacing: Tones.space2
+                Layout.topMargin: Tones.space1
+                SettingsIcon {
+                    name: message.isError ? "alert" : "check"
+                    color: message.isError ? Tones.error : Tones.textSecondary
+                    Layout.alignment: Qt.AlignTop
+                    Layout.topMargin: Math.max(0, (messageMetrics.height - height) / 2)
+                }
+                FontMetrics { id: messageMetrics; font: message.font }
                 Label {
                     id: message
                     objectName: "message"
                     readonly property bool isError: win.backend.error.length > 0
                     text: isError ? win.backend.error : win.backend.notice
-                    color: isError ? Tones.error : Tones.ink
+                    color: isError ? Tones.error : Tones.textPrimary
                     wrapMode: Text.Wrap
                     maximumLineCount: 3
                     elide: Text.ElideRight
@@ -572,40 +606,64 @@ ApplicationWindow {
                     onClicked: win.backend.dismiss()
                 }
             }
-            RowLayout {
+            // Una fila; si no caben el estado y las dos acciones, dos (las acciones debajo, a la derecha).
+            GridLayout {
+                id: footerRow
                 visible: win.backend.ready
-                spacing: Tones.small
-                BusyIndicator {
-                    running: win.backend.busy
-                    visible: running && win.width >= 465
-                    implicitWidth: 22
-                    implicitHeight: 22
-                }
-                Label {
-                    objectName: "customCount"
-                    text: win.backend.customCount ? win.backend.customCount + " customised" : "All defaults"
-                    color: Tones.muted
-                    elide: Text.ElideRight
+                readonly property bool wraps: width < countLabel.implicitWidth + restoreButton.implicitWidth
+                    + resetButton.implicitWidth + Tones.space8 * 2
+                columns: wraps ? 1 : 2
+                rowSpacing: 0
+                columnSpacing: Tones.space3
+                Layout.minimumHeight: Tones.footerHeight - Tones.space2 - Tones.stroke
+                RowLayout {
+                    spacing: Tones.space2
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
+                    Layout.minimumHeight: Tones.controlHeight
+                    BusyIndicator {
+                        running: win.backend.busy
+                        visible: running
+                        implicitWidth: Tones.iconSize + Tones.space1
+                        implicitHeight: implicitWidth
+                        Accessible.name: "Saving"
+                    }
+                    Label {
+                        id: countLabel
+                        objectName: "customCount"
+                        text: win.backend.customCount ? win.backend.customCount + " customised" : "All defaults"
+                        color: Tones.textSecondary
+                        font.pixelSize: Tones.helperSize
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                    }
                 }
-                ActionButton {
-                    objectName: "restore"
-                    text: "Restore previous"
-                    flat: true
-                    Accessible.name: "Restore the settings saved before the last reset"
-                    ToolTip.visible: hovered || visualFocus
-                    ToolTip.text: Accessible.name
-                    onClicked: win.backend.restorePrevious()
-                }
-                ActionButton {
-                    objectName: "resetAll"
-                    text: win.backend.resetArmed ? "Press again to reset" : "Reset all"
-                    enabled: win.backend.customCount > 0
-                    highlighted: win.backend.resetArmed
-                    flat: true
-                    Accessible.name: win.backend.resetArmed ? "Press again to reset every setting" : "Reset all settings"
-                    onClicked: win.backend.resetAll()
+                RowLayout {
+                    spacing: Tones.space2
+                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                    ActionButton {
+                        id: restoreButton
+                        objectName: "restore"
+                        text: "Restore previous"
+                        flat: true
+                        Accessible.name: "Restore the settings saved before the last reset"
+                        ToolTip.visible: hovered || visualFocus
+                        ToolTip.text: Accessible.name
+                        ToolTip.delay: 400
+                        onClicked: win.backend.restorePrevious()
+                    }
+                    ActionButton {
+                        id: resetButton
+                        objectName: "resetAll"
+                        text: win.backend.resetArmed ? "Press again to reset" : "Reset all"
+                        enabled: win.backend.customCount > 0
+                        highlighted: win.backend.resetArmed
+                        destructive: true
+                        flat: true
+                        Accessible.name: win.backend.resetArmed ? "Press again to reset every setting" : "Reset all settings"
+                        onClicked: win.backend.resetAll()
+                    }
                 }
             }
         }

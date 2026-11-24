@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 
+// Vertical scrolling only, with a square scroll bar; keeps the focused control in view while tabbing.
 ScrollView {
     id: root
 
@@ -10,6 +11,13 @@ ScrollView {
     contentWidth: availableWidth
     clip: true
     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+    ScrollBar.vertical: SquareScrollBar {
+        parent: root
+        x: root.mirrored ? 0 : root.width - width
+        y: root.topPadding
+        height: root.availableHeight
+        active: root.ScrollBar.horizontal.active
+    }
 
     onFocusedChanged: {
         const flick = root.viewport;
@@ -17,8 +25,8 @@ ScrollView {
         for (let ancestor = root.focused; ancestor; ancestor = ancestor.parent) {
             if (ancestor !== flick.contentItem) continue;
             const y = root.focused.mapToItem(flick.contentItem, 0, 0).y;
-            const top = y - Tones.gap;
-            const bottom = y + root.focused.height + Tones.gap;
+            const top = y - Tones.space6;
+            const bottom = y + root.focused.height + Tones.space6;
             if (top < flick.contentY)
                 flick.contentY = Math.max(flick.originY, top);
             else if (bottom > flick.contentY + flick.height)

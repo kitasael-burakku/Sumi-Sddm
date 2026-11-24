@@ -602,6 +602,22 @@ class EditorUiFakeTest(WindowCase):
         self.assertTrue(self.item("field-avatar").isVisible())
         self.assertEqual(self.item("pageTitle").property("text"), "1 result")
 
+    def test_navigation_counts_match_the_footer(self):
+        """Una sola definición de «personalizado»: la de «Reset all» (claves de la configuración). El avatar no cuenta."""
+        self.loaded()
+        self.type_in(self.control("accentColor", "hex"), "#123456")
+        self.show("clock")
+        self.click(self.control("clockFormat", "segment-12h"))
+        self.show("users")
+        self.dialog("field-avatar", str(self.dir / "me.png"))
+        self.idle()
+        self.assertTrue(self.item("customDot", self.item("field-avatar")).isVisible(), "la fila sí lo marca")
+        counts = self.win.property("customByGroup")
+        counts = counts.toVariant() if hasattr(counts, "toVariant") else counts
+        self.assertEqual(sum(counts.values()), self.b.customCount)
+        self.assertEqual(self.item("customCount").property("text"), f"{self.b.customCount} customised")
+        self.assertNotIn("users", counts)
+
     def test_wallpaper_dialog(self):
         self.loaded()
         self.show("users")
@@ -1014,30 +1030,62 @@ QtObject {
                         self.assertGreaterEqual(left, -1, context)
                         self.assertLessEqual(right, field.width() + 1, context)
 
-    def tones(self) -> dict:
+    def tones(self, *names: str) -> dict:
         t = self.win.property("tones")
-        return {k: t.property(k) for k in ("dark", "error", "pending", "window")}
+        return {k: t.property(k) for k in names}
+
+    # Texto sobre las superficies donde aparece (4.5:1), y bordes e indicadores de controles (3:1).
+    TEXT_PAIRS = [(fg, bg) for fg in ("textPrimary", "textSecondary", "textMuted", "accent", "error", "warning",
+                                      "success", "info")
+                  for bg in ("appBackground", "chromeBackground", "sidebarBackground", "previewBackground",
+                             "groupSurface", "controlSurface", "hoverSurface", "selectedSurface", "overlaySurface")
+                  # lo seleccionado pasa su texto a primario o escarcha: el atenuado nunca va sobre esa superficie
+                  if (fg, bg) != ("textMuted", "selectedSurface")] + [
+        ("textOnAccent", "accent"), ("textOnAccent", "accentHover"), ("textOnAccent", "accentPressed"),
+        ("error", "errorSurface"), ("warning", "warningSurface"), ("success", "successSurface"),
+        ("info", "infoSurface")]
+    BOUNDARY_PAIRS = [("controlBorder", bg) for bg in ("groupSurface", "controlSurface", "appBackground",
+                                                       "overlaySurface", "previewBackground")] + [
+        ("borderHover", "hoverSurface"), ("focusRing", "groupSurface"), ("focusRing", "selectedSurface"),
+        ("accent", "controlSurface"), ("accent", "selectedSurface"), ("modified", "groupSurface")]
 
     def test_light_and_dark(self):
         # Lo que hacen KDE, GNOME (su tema de plataforma) o qt6ct: dar a la aplicación una paleta clara u oscura,
-        # también con la ventana abierta (quien cambia el modo del escritorio con el editor en marcha). Fusion y
-        # los tonos propios (Tones) deben seguirla. Offscreen no tiene tema de plataforma: se fija la paleta.
+        # también con la ventana abierta (quien cambia el modo del escritorio con el editor en marcha). Black Frost
+        # la sigue (variante oscura o clara) y en las dos cumple los contrastes. Offscreen no tiene tema: se fija.
         from PySide6.QtGui import QPalette
         self.open(program=str(CLI))
         self.ready()
+        names = {n for pair in self.TEXT_PAIRS + self.BOUNDARY_PAIRS for n in pair} | {"dark", "appBackground"}
         try:
-            for base, dark in (("#2b2d31", True), ("#efefef", False)):
+            for base, dark, background in (("#2b2d31", True, "#0d0f14"), ("#efefef", False, "#f5f7fa")):
                 QGuiApplication.setPalette(QPalette(QColor(base)))
                 spin(0.1)
-                t = self.tones()
+                t = self.tones(*names)
                 self.assertEqual(t["dark"], dark, base)
+                self.assertEqual(t["appBackground"].name(), background, base)
                 img = self.win.grabWindow()
                 bg = img.pixelColor(img.width() // 2, img.height() // 2)
                 self.assertEqual(luminance(bg) < 0.2, dark, (base, bg.name()))
-                for k in ("error", "pending"):
-                    self.assertGreaterEqual(contrast(t[k], t["window"]), 4.5, (base, k, t[k].name()))
+                for fg, b in self.TEXT_PAIRS:
+                    self.assertGreaterEqual(contrast(t[fg], t[b]), 4.5, (base, fg, b, t[fg].name(), t[b].name()))
+                for fg, b in self.BOUNDARY_PAIRS:
+                    self.assertGreaterEqual(contrast(t[fg], t[b]), 3.0, (base, fg, b, t[fg].name(), t[b].name()))
         finally:
             QGuiApplication.setPalette(QPalette())
+
+    def test_square_geometry(self):
+        """Radio 0 en todo lo del editor; sólo el avatar (contenido circular) es redondo."""
+        self.open(program=str(CLI))
+        self.ready()
+        self.assertEqual(self.win.property("tones").property("cornerRadius"), 0)
+        round_items = []
+        for page in self.pages():
+            for it in self.items():
+                r = it.property("radius")
+                if it.isVisible() and isinstance(r, (int, float)) and r > 0 and it.objectName() != "avatarFrame":
+                    round_items.append(f"{page}: {it.objectName() or it.metaObject().className()} r={r}")
+        self.assertEqual(round_items, [])
 
 if __name__ == "__main__":
     unittest.main()

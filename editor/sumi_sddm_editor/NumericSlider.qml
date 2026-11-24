@@ -1,35 +1,40 @@
 import QtQuick
 import QtQuick.Controls
 
+// Slider recipe: 4 px track (control border → frost), 14 px square frost thumb, 32 px tall hit area.
 Slider {
     id: root
 
     hoverEnabled: true
-    implicitHeight: Tones.controlHeight
-    padding: Tones.small
+    implicitHeight: Math.max(Tones.sliderHitHeight, Tones.controlHeight)
+    padding: Tones.space1
+    leftPadding: Tones.sliderThumb / 2
+    rightPadding: Tones.sliderThumb / 2
     background: Rectangle {
         x: root.leftPadding
         y: (root.height - height) / 2
         width: root.availableWidth
-        height: Tones.small
-        radius: height / 2
-        color: Tones.border
+        height: Tones.sliderTrack
+        radius: Tones.cornerRadius
+        color: root.enabled ? Tones.controlBorder : Tones.borderSubtle
         Rectangle {
             width: root.visualPosition * parent.width
             height: parent.height
-            radius: parent.radius
-            color: root.enabled ? Tones.accent : Tones.disabled
+            radius: Tones.cornerRadius
+            color: root.enabled ? Tones.accent : Tones.textDisabled
         }
     }
     handle: Rectangle {
-        x: root.leftPadding + root.visualPosition * (root.availableWidth - width)
+        x: root.leftPadding + root.visualPosition * root.availableWidth - width / 2
         y: (root.height - height) / 2
-        width: 16
+        width: Tones.sliderThumb
         height: width
-        radius: width / 2
-        color: !root.enabled ? Tones.disabled : root.hovered || root.pressed ? Tones.ink : Tones.accent
-        border.width: root.visualFocus ? Tones.focusStroke : Tones.stroke
-        border.color: root.visualFocus ? Tones.ink : Tones.window
-        Behavior on color { ColorAnimation { duration: Tones.duration; easing.type: Tones.easing } }
+        radius: Tones.cornerRadius
+        color: !root.enabled ? Tones.textDisabled
+            : root.pressed ? Tones.accentPressed : root.hovered ? Tones.accentHover : Tones.accent
+        border.width: Tones.stroke
+        border.color: Tones.separation
+        Behavior on color { ColorAnimation { duration: Tones.hoverDuration; easing.type: Tones.easing } }
+        FocusRing { shown: root.visualFocus }
     }
 }

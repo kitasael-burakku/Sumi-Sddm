@@ -28,18 +28,31 @@ Item {
 
         title: "Avatar"
         description: root.info ? root.backend.captionFor("avatar") : ""
-        descriptionColor: root.info && root.info.error ? Tones.error : Tones.muted
+        descriptionColor: root.info && root.info.error ? Tones.error : Tones.textSecondary
         modified: root.exists
 
-        control: RowLayout {
-            spacing: Tones.gap
+        // Una línea si cabe; si no (ventana estrecha, texto grande), «Remove» pasa debajo. El ancho implícito es
+        // siempre el de una línea, para que la fila decida sin bucles si el control va al lado o debajo.
+        control: GridLayout {
+            id: avatarControls
+            readonly property real oneLine: avatarFrame.implicitWidth + chooseAvatar.implicitWidth
+                + (removeAvatar.visible ? removeAvatar.implicitWidth + columnSpacing : 0) + columnSpacing
+            implicitWidth: oneLine
+            columns: width > 0 && width < oneLine ? 2 : 3
+            columnSpacing: Tones.space2
+            rowSpacing: Tones.space2
             Rectangle {
+                id: avatarFrame
                 objectName: "avatarFrame"
                 implicitWidth: 42
                 implicitHeight: width
                 radius: width / 2
-                color: Tones.control
+                color: Tones.controlSurface
+                border.width: Tones.stroke
+                border.color: Tones.borderDefault
                 clip: true
+                Layout.rowSpan: avatarControls.columns === 2 && removeAvatar.visible ? 2 : 1
+                Layout.alignment: Qt.AlignTop
                 SettingsIcon { name: "users"; visible: !root.exists; anchors.centerIn: parent }
                 Image {
                     objectName: "avatarImage"
@@ -55,21 +68,24 @@ Item {
                 }
             }
             ActionButton {
+                id: chooseAvatar
                 objectName: "chooseAvatar"
                 text: "Choose picture…"
                 Accessible.name: "Choose your picture"
+                Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                 onClicked: pictures.open()
             }
             ActionButton {
+                id: removeAvatar
                 objectName: "removeAvatar"
                 visible: root.exists
                 text: "Remove"
                 flat: true
-                tone: Tones.error
+                destructive: true
                 Accessible.name: "Remove your picture"
+                Layout.alignment: Qt.AlignLeft | Qt.AlignVCenter
                 onClicked: root.backend.clearAvatar()
             }
-            Item { Layout.fillWidth: true }
         }
     }
 
@@ -94,9 +110,9 @@ Item {
     Rectangle {
         anchors.fill: parent
         visible: drop.containsDrag
-        color: Tones.unfilled
+        color: Tones.transparent
         border.width: Tones.focusStroke
         border.color: Tones.accent
-        radius: Tones.controlRadius
+        radius: Tones.cornerRadius
     }
 }
