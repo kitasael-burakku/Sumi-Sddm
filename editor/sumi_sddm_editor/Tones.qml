@@ -153,7 +153,6 @@ QtObject {
     }
     readonly property bool motion: !reduceMotion && !systemReducesMotion
     readonly property int hoverDuration: motion ? 100 : 0
-    readonly property int navDuration: motion ? 120 : 0
     readonly property int overlayDuration: motion ? 140 : 0
     readonly property int previewDuration: motion ? 150 : 0
     /** Kept for callers and tests that only ask whether motion is on. */

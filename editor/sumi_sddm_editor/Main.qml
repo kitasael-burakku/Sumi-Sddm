@@ -475,18 +475,8 @@ ApplicationWindow {
                         width: Math.min(Tones.contentMaxWidth, parent.width - parent.gutter * 2)
                         spacing: Tones.space8
 
-                        NumberAnimation on opacity {
-                            id: pageTransition
-                            running: false
-                            from: 0.76
-                            to: 1
-                            easing.type: Tones.easing
-                            duration: Tones.navDuration
-                        }
-                        Connections {
-                            target: win
-                            function onGroupChanged() { if (!win.searching && Tones.motion) pageTransition.restart(); }
-                        }
+                        // Sin fundido al cambiar de página: la página nueva aparece entera de inmediato (el fundido
+                        // hacía que cada cambio pareciera tardar).
                         SectionHeader {
                             Layout.fillWidth: true
                             title: win.searching ? (win.resultCount === 1 ? "1 result" : win.resultCount + " results")

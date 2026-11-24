@@ -391,6 +391,10 @@ Item {
         ActionButton {
             id: fontButton
             readonly property string family: String(root.value || "")
+            // Copia JS de la lista, una vez por cada lista nueva: filtrar directamente la de Python (`backend.fonts`)
+            // costaba ~70 ms por pasada con ~900 familias, al entrar en la página y en cada tecla de la búsqueda.
+            readonly property var families: [{ family: "", system: true }].concat(
+                root.backend.fonts.map(f => ({ family: String(f.family || ""), system: f.system === true })))
             objectName: "fontButton"
             implicitWidth: 220
             text: fontButton.family.length > 0 ? fontButton.family : "Bundled Inter"
@@ -437,7 +441,7 @@ Item {
                     InputField {
                         id: fontSearch
                         objectName: "fontSearch"
-                        placeholderText: "Search " + root.backend.fonts.length + " fonts"
+                        placeholderText: "Search " + (fontButton.families.length - 1) + " fonts"
                         Accessible.name: "Search fonts"
                         Layout.fillWidth: true
                         Keys.onDownPressed: { fontList.forceActiveFocus(); fontList.currentIndex = 0; }
@@ -460,8 +464,9 @@ Item {
                         Layout.fillHeight: true
                         clip: true
                         keyNavigationEnabled: true
-                        // la primera fila es el valor por defecto (Inter, incluida en el tema)
-                        model: [{ family: "", system: true }].concat(root.backend.fonts).filter(f =>
+                        // la primera fila es el valor por defecto (Inter, incluida en el tema). Las filas, sólo con la
+                        // lista abierta: cada una carga su propia letra y no hace falta mientras nadie la abra.
+                        model: !fontPopup.visible ? [] : fontButton.families.filter(f =>
                             fontList.q.length === 0 || (f.family === "" ? "bundled inter default" : f.family.toLowerCase())
                                 .indexOf(fontList.q) >= 0)
                         ScrollBar.vertical: SquareScrollBar {}
