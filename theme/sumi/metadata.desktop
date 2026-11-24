@@ -1,6 +1,6 @@
 [SddmGreeterTheme]
 Name=Sumi
-Description=Minimal login screen with a top notch as the authentication centre
+Description=Minimal login screen with Login Edge, a notch-shaped panel at the top, as the authentication centre
 Author=Sumi SDDM contributors
 Type=sddm-theme
 Version=0.1.0

@@ -32,8 +32,8 @@ Reglas de formato: los textos, colores y rutas se escriben entre comillas; sin c
 | `accentColor` | color | #RRGGBB | #AARRGGBB | `"#a9bdff"` | Acento: anillos de foco, botón de enviar. |
 | `textColor` | color | #RRGGBB | #AARRGGBB | `"#f3f3f5"` | Texto principal (los secundarios son este color con transparencia). |
 | `errorColor` | color | #RRGGBB | #AARRGGBB | `"#ff8f87"` | Mensajes de error y botón de confirmación de energía. |
-| `notchColor` | color | #RRGGBB | #AARRGGBB | `"#000000"` | Relleno de la notch. |
-| `fieldColor` | color | #RRGGBB | #AARRGGBB | `"#1c1c1f"` | Campos y botones dentro de la notch. |
+| `notchColor` | color | #RRGGBB | #AARRGGBB | `"#000000"` | Relleno de Login Edge. |
+| `fieldColor` | color | #RRGGBB | #AARRGGBB | `"#1c1c1f"` | Campos y botones dentro de Login Edge. |
 
 ## Tipografía y escala
 
@@ -41,18 +41,18 @@ Reglas de formato: los textos, colores y rutas se escriben entre comillas; sin c
 |---|---|---|---|---|
 | `fontFamily` | string | texto (máx. 64) | `""` | Familia tipográfica instalada en el sistema. Vacío = Inter incluida en el tema. |
 | `uiScale` | number | 0.5–2.0 | `1` | Escala global, además del ajuste automático a la resolución, 0.5–2. |
-| `fontScale` | number | 0.75–1.5 | `1` | Tamaño del texto de la notch, botones y nombres, 0.75–1.5 (el reloj usa clockScale). |
+| `fontScale` | number | 0.75–1.5 | `1` | Tamaño del texto de Login Edge, botones y nombres, 0.75–1.5 (el reloj usa clockScale). |
 
-## Notch
+## Login Edge
 
 | Clave | Tipo | Valores | Defecto | Descripción |
 |---|---|---|---|---|
-| `notchCompactWidth` | integer | 120–480 | `200` | Ancho de la notch compacta, en píxeles de referencia (1920×1080). |
-| `notchCompactHeight` | integer | 24–64 | `34` | Alto de la notch compacta. |
-| `notchExpandedWidth` | integer | 340–720 | `440` | Ancho de la notch expandida (el alto depende del contenido). |
+| `notchCompactWidth` | integer | 120–480 | `200` | Ancho de Login Edge recogido, en píxeles de referencia (1920×1080). |
+| `notchCompactHeight` | integer | 24–64 | `34` | Alto de Login Edge recogido. |
+| `notchExpandedWidth` | integer | 340–720 | `440` | Ancho de Login Edge desplegado (el alto depende del contenido). |
 | `notchRadius` | integer | 4–48 | `22` | Radio de las esquinas inferiores. |
 | `notchShoulder` | integer | 0–24 | `12` | Curva de unión con el borde superior (0 = sin curva). |
-| `notchStartExpanded` | bool | true | false | `false` | true = empieza expandida; false = compacta (escribir la expande igualmente). |
+| `notchStartExpanded` | bool | true | false | `false` | true = Login Edge empieza desplegado; false = recogido (escribir lo despliega igualmente). |
 | `notchIdleCollapse` | integer | 0 o 5–600 | `60` | Segundos sin actividad para recogerse y borrar la contraseña escrita: 0 (nunca) o 5–600. |
 
 ## Reloj

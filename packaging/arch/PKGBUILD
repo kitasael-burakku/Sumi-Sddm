@@ -9,7 +9,7 @@ pkgname=('sumi-sddm' 'sumi-sddm-editor')
 # Literal (namcap analiza el PKGBUILD sin coreutils); tests/py/test_packaging.py exige que coincida con VERSION.
 pkgver=0.6.2
 pkgrel=1
-pkgdesc="Minimal SDDM login theme with a top notch"
+pkgdesc="Minimal SDDM login theme with Login Edge, a notch-shaped sign-in panel at the top"
 arch=('any')
 url="https://github.com/kitasael-burakku/Sumi-Sddm"
 # El proyecto es MIT (LICENSE); Inter va con la SIL OFL 1.1.
@@ -31,7 +31,7 @@ check() {
 }
 
 package_sumi-sddm() {
-  pkgdesc="Minimal SDDM login theme with a top notch, plus its command-line tool and a polkit helper to apply its settings"
+  pkgdesc="Minimal SDDM login theme with Login Edge, a notch-shaped sign-in panel at the top, plus its command-line tool and a polkit helper to apply its settings"
   depends=('sddm' 'qt6-declarative' 'python' 'polkit' 'util-linux' 'systemd')
   optdepends=('qt6-imageformats: WebP wallpapers'
               'sumi-sddm-editor: graphical settings window')

@@ -1,23 +1,23 @@
 # Sumi SDDM
 
-Un tema de inicio de sesión para **SDDM** (Qt 6), minimalista y oscuro. Todo gira en torno a una **notch** en el
-borde superior de la pantalla: está recogida mientras no la usas y se despliega en cuanto empiezas a escribir.
+Un tema de inicio de sesión para **SDDM** (Qt 6), minimalista y oscuro. Todo gira en torno a **Login Edge**, un panel
+en el borde superior de la pantalla: está recogido mientras no lo usas y se despliega en cuanto empiezas a escribir.
 
-![Pantalla de inicio de Sumi SDDM con la notch desplegada](docs/screenshots/expanded.png)
+![Pantalla de inicio de Sumi SDDM con Login Edge desplegado](docs/screenshots/expanded.png)
 
-| Notch recogida | Elegir sesión | Confirmar apagado |
+| Login Edge recogido | Elegir sesión | Confirmar apagado |
 |---|---|---|
-| ![Notch recogida](docs/screenshots/compact.png) | ![Lista de sesiones](docs/screenshots/sessions.png) | ![Confirmación de apagado](docs/screenshots/confirm.png) |
+| ![Login Edge recogido](docs/screenshots/compact.png) | ![Lista de sesiones](docs/screenshots/sessions.png) | ![Confirmación de apagado](docs/screenshots/confirm.png) |
 
 ## Qué ofrece
 
-- **Escribe y entra.** Desde la notch recogida, la primera tecla la despliega y ya escribe en el campo de
+- **Escribe y entra.** Desde Login Edge recogido, la primera tecla la despliega y ya escribe en el campo de
   contraseña. Intro inicia sesión.
-- **Todo a mano, sin ventanas.** Sesión (Hyprland, Plasma…), reiniciar y apagar viven dentro de la notch.
+- **Todo a mano, sin ventanas.** Sesión (Hyprland, Plasma…), reiniciar y apagar viven dentro de Login Edge.
   Apagar y reiniciar piden confirmación, y *Cancelar* tiene el foco por defecto.
 - **Varios usuarios**, con avatar o iniciales, y un selector en la parte inferior.
 - **Muy configurable** (41 opciones): fondo o wallpaper con desenfoque, colores, tipografía, escala, tamaño de
-  la notch, formato del reloj, animaciones, varios monitores… Lista completa en [docs/CONFIG.md](docs/CONFIG.md).
+  Login Edge, formato del reloj, animaciones, varios monitores… Lista completa en [docs/CONFIG.md](docs/CONFIG.md).
 - **Una configuración rota nunca te deja fuera.** Al configurar se valida todo de forma estricta. En la pantalla
   de inicio, un valor que no se entiende vuelve a su valor por defecto.
 - **Se usa entera con el teclado** y es accesible: cada control tiene rol y nombre para lectores de pantalla.
@@ -100,7 +100,7 @@ sumi-sddm avatar set ~/Imágenes/yo.png                  # tu foto de usuario
 sumi-sddm config fonts                                  # tipografías instaladas que puede usar la pantalla de inicio
 ```
 
-Las opciones se agrupan en: **fondo, colores, tipografía y escala, notch, reloj, selector de usuarios, energía,
+Las opciones se agrupan en: **fondo, colores, tipografía y escala, Login Edge, reloj, selector de usuarios, energía,
 movimiento y comportamiento**. Cada una, con su rango y su valor por defecto, está en [docs/CONFIG.md](docs/CONFIG.md).
 
 > SDDM se ejecuta como el usuario `sddm`, que no puede leer tu carpeta personal. Por eso `system apply` copia el
@@ -129,10 +129,10 @@ avisa y recarga en vez de pisarlo.
 
 | Dónde | Tecla | Acción |
 |---|---|---|
-| Notch recogida | cualquier carácter | la despliega y escribe el carácter en el campo |
+| Login Edge recogido | cualquier carácter | la despliega y escribe el carácter en el campo |
 | | Intro / Espacio / ↓ | la despliega |
 | Campo de contraseña | Intro | iniciar sesión |
-| | Esc | borra lo escrito; con el campo vacío, recoge la notch |
+| | Esc | borra lo escrito; con el campo vacío, recoge Login Edge |
 | Cualquier sitio | Tab / Mayús+Tab | contraseña → sesión → reiniciar → apagar → usuarios |
 | Selector de usuarios | ← / → | cambia de usuario (borra la contraseña escrita) |
 | | Intro / Espacio | vuelve al campo |
