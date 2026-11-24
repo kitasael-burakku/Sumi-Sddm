@@ -7,7 +7,7 @@
 pkgbase=sumi-sddm
 pkgname=('sumi-sddm' 'sumi-sddm-editor')
 # Literal (namcap analiza el PKGBUILD sin coreutils); tests/py/test_packaging.py exige que coincida con VERSION.
-pkgver=0.6.2
+pkgver=0.6.3
 pkgrel=1
 pkgdesc="Minimal SDDM login theme with Login Edge, a notch-shaped sign-in panel at the top"
 arch=('any')
